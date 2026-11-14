@@ -1,71 +1,52 @@
 <script setup lang="ts">
-import { computed, getCurrentScope, shallowReactive, watch } from 'vue'
-import type { Ref } from 'vue'
+import { computed } from 'vue'
 import { dailyTipDateKey, visibleDailyTips } from '~/utils/dailyTips'
 
-type Task = ApiData<Api['api']['task']['get']>[number]
+type DailyTips = ApiData<Api['api']['dailytips']['get']>
 
-const props = defineProps<{ phaseId?: number, date?: string }>()
+const props = defineProps<{
+  /** 所属阶段 ID。 */
+  phaseId?: number
+  /** 显示的日期，默认今天。 */
+  date?: string
+  /** 提示快照对应的日期。 */
+  snapshotDate: DailyTips['date'] | undefined
+  /** 提示内容及关联信息。 */
+  tips: DailyTips['tips'] | undefined
+  /** 提示关联的任务数据。 */
+  tasks: DailyTips['tasks'] | undefined
+  /** 当前日期的课程实例。 */
+  occurrences: DailyTips['occurrences'] | undefined
+  /** 提示数据是否正在读取。 */
+  pending: boolean
+}>()
+
 const { now, timeZone } = useSystemTime()
+
 const day = computed(() => props.date || (now.value ? calendarDate(now.value, timeZone.value) : ''))
-const client = useApi({
-  key: () => `dailytips:v2:${props.phaseId ?? 'all'}:${day.value || 'pending'}:${timeZone.value}`,
-  read: async api => !day.value ? null : api.api.dailytips.get({ query: { phase: props.phaseId, date: day.value } })
-})
-const { data, pending, refresh } = useAsyncData(client.key, client.read, { deep: true })
-const app = useNuxtApp()
-const scope = getCurrentScope()
-const taskCaches = shallowReactive(new Map<number, Ref<Task[] | undefined>>())
-// 只订阅已有任务缓存，完成、撤销和延期后直接重算，不额外请求全部任务。
-watch(() => data.value?.tasks, (tasks) => {
-  for (const task of tasks ?? []) {
-    if (!taskCaches.has(task.phaseId)) {
-      scope?.run(() => {
-        app.runWithContext(() => {
-          taskCaches.set(task.phaseId, useNuxtData<Task[]>(`tasks:${task.phaseId}:all`).data)
-        })
-      })
-    }
-  }
-}, { immediate: true, flush: 'sync' })
-const tips = computed(() => {
-  const snapshot = data.value
-  if (!snapshot || dailyTipDateKey(snapshot.date) !== day.value) return []
-  const tasks = snapshot.tasks.map(task => taskCaches.get(task.phaseId)?.value?.find(value => value.id === task.id) ?? task)
-  const date = now.value && calendarDate(now.value, timeZone.value) === day.value
-    ? now.value
-    : parseZonedDateTime(day.value, timeZone.value)
-  return visibleDailyTips(snapshot.tips, tasks, snapshot.occurrences, day.value, date, timeZone.value, props.phaseId)
-})
+
 function tipTime(time: number | null) {
   if (time === null) return '全天'
   return new Intl.DateTimeFormat('zh-CN', { timeZone: timeZone.value, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(time)
 }
+
+const visibleTips = computed(() => {
+  if (!props.snapshotDate || dailyTipDateKey(props.snapshotDate) !== day.value) return []
+  const date = now.value && calendarDate(now.value, timeZone.value) === day.value
+    ? now.value
+    : parseZonedDateTime(day.value, timeZone.value)
+  return visibleDailyTips(props.tips ?? [], props.tasks ?? [], props.occurrences ?? [], day.value, date, timeZone.value, props.phaseId)
+})
 </script>
 
 <template>
-  <section
-    class="daily-tips"
-    aria-label="每日提示"
-  >
-    <header class="daily-tips__header">
-      <h2>每日提示</h2>
-      <span class="daily-tips__date">{{ day }}</span>
-      <button
-        class="button"
-        type="button"
-        :disabled="pending || !day"
-        @click="refresh()"
-      >
-        {{ pending ? '加载中……' : '刷新' }}
-      </button>
-    </header>
+  <section class="daily-tips">
     <ul
-      v-if="tips.length"
+      v-if="visibleTips.length"
       class="daily-tips__list"
     >
       <li
-        v-for="tip in tips"
+        v-for="tip in visibleTips"
         :key="tip.id"
         class="daily-tips__tip"
       >
@@ -84,7 +65,7 @@ function tipTime(time: number | null) {
       </li>
     </ul>
     <p
-      v-else-if="!data"
+      v-else-if="!snapshotDate"
       class="daily-tips__empty"
       role="status"
     >
@@ -108,21 +89,6 @@ function tipTime(time: number | null) {
   height: 100%;
   min-height: 0;
 }
-.daily-tips__header {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 7px;
-}
-.daily-tips__header h2 {
-  margin: 0;
-  font-size: 13px;
-}
-.daily-tips__date {
-  margin-left: auto;
-  color: var(--text-secondary);
-  font-size: 12px;
-}
 .daily-tips__list {
   min-height: 0;
   overflow-y: auto;
@@ -139,7 +105,7 @@ function tipTime(time: number | null) {
 }
 .daily-tips__timing {
   display: flex;
-  flex: 0 0 90px;
+  flex: 0 0 auto;
   flex-direction: column;
   gap: 4px;
   color: var(--text-secondary);

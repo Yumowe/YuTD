@@ -43,6 +43,7 @@ export function provideBackground(
   const imageSize = ref({ width: 0, height: 0 })
   const geometry = computed<BackgroundGeometry>(() => {
     const { width, height } = size.value
+    if (!src.value) return { centerX: width / 2, centerY: height / 2, width, height }
     const crop = position.value
     if (crop) {
       const scale = Math.max(width / crop.width, height / crop.height)

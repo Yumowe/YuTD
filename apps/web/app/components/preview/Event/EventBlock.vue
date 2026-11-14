@@ -4,22 +4,35 @@ import { gsap } from 'gsap'
 import { TextPlugin } from 'gsap/TextPlugin'
 
 const props = withDefaults(defineProps<{
+  /** 距离时间表顶部的像素位置。 */
   top: number
+  /** 事件块高度。 */
   height: number
+  /** 事件颜色。 */
   color?: string | null
+  /** 关联事件 ID。 */
   eventId: number
+  /** 事件名称。 */
   eventName: string
+  /** 排课开始时间。 */
   startTime: string
+  /** 排课结束时间。 */
   endTime: string
+  /** 本次地点。 */
   location?: string | null
+  /** 本次授课人或组织者。 */
   organizer?: string | null
+  /** 是否处于聚焦状态。 */
   focused?: boolean
+  /** 聚焦动画进度。 */
   focusProgress?: number
+  /** 是否正在调整位置或尺寸。 */
   moving?: boolean
+  /** 事件关联的提示。 */
   tips?: { id: number, content: string }[]
+  /** 是否显示编辑入口。 */
   editable?: boolean
 }>(), { editable: true })
-const { mode } = useSystemStatus()
 
 // 向父组件传递点击事件
 const emit = defineEmits<{
@@ -27,21 +40,10 @@ const emit = defineEmits<{
   edit: [eventId: number]
 }>()
 
-const blockStyle = computed(() => ({
-  'top': `${props.top}px`,
-  'height': `${props.height}px`,
-  '--event-color': props.color ?? 'var(--text-primary)'
-}))
+const { mode } = useSystemStatus()
 
-function handleClick(event: MouseEvent) {
-  const element = event.currentTarget
-
-  if (!(element instanceof HTMLElement))
-    return
-
-  emit('select', element)
-}
 const tintColor = computed(() => props.color ?? '#FFFFFF')
+
 function invertColor(hex: string): string {
   const color = hex.replace('#', '')
 
@@ -51,11 +53,23 @@ function invertColor(hex: string): string {
 }
 
 const tColor = computed(() => invertColor(tintColor.value))
+
 const visibleTips = computed(() => (props.tips ?? []).filter(tip => tip.content.trim()))
+
+const blockStyle = computed(() => ({
+  'top': `${props.top}px`,
+  'height': `${props.height}px`,
+  '--event-color': props.color ?? 'var(--text-primary)'
+}))
+
 const progress = computed(() => props.focused ? Math.max(0, Math.min(1, props.focusProgress ?? 0)) : 0)
+
 const tipElements = ref<HTMLElement[]>([])
+
 const retracting = ref(false)
+
 let typing: ReturnType<typeof gsap.timeline> | undefined
+
 let typingTween: ReturnType<typeof gsap.to> | undefined
 
 function clearTyping() {
@@ -115,7 +129,17 @@ onMounted(() => {
     }
   }, { immediate: true, flush: 'post' })
 })
+
 onBeforeUnmount(clearTyping)
+
+function handleClick(event: MouseEvent) {
+  const element = event.currentTarget
+
+  if (!(element instanceof HTMLElement))
+    return
+
+  emit('select', element)
+}
 </script>
 
 <template>

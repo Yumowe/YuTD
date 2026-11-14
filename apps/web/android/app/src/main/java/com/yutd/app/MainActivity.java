@@ -3,11 +3,13 @@ package com.yutd.app;
 import android.os.Bundle;
 import android.os.Build;
 import androidx.activity.EdgeToEdge;
+import androidx.core.splashscreen.SplashScreen;
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        SplashScreen.installSplashScreen(this);
         registerPlugin(YuTDPlugin.class);
         super.onCreate(savedInstanceState);
         EdgeToEdge.enable(this);

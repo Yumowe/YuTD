@@ -1,9 +1,10 @@
-import { analyzeImage, createColorPixels } from './utils'
-import type { AnaV2Options } from './anav2'
-import { encodeIndexedPng } from './png'
+import type { AnaOptions, Color, ColorRegion } from './types'
+import type { SimplifyImageReply, SimplifyImageRequest, SimplifyImageResult } from './simplify.worker'
 
-export { analyzePixelsV2, defaultAnalysisOptions, toOklab } from './anav2'
-export type { AnaV2Options, ColorAnalysis } from './anav2'
+export { analyzePixels, defaultAnalysisOptions, getLineProtectionMask } from './ana'
+export { toOklab } from './math'
+export { regionJSONToPixels, toRegionJSON } from './render'
+export type { AnaOptions, Color, ColorAnalysis, ColorRegion } from './types'
 
 export interface SimplifiedImageData {
   width: number
@@ -14,6 +15,16 @@ export interface SimplifiedImageData {
   alpha?: number[]
 }
 
+export interface SimplifiedImageRegions {
+  version: 1
+  width: number
+  height: number
+  colors: {
+    color: Color
+    regions: Omit<ColorRegion, 'label' | 'area'>[]
+  }[]
+}
+
 export interface SimplifiedImageComparison {
   png: Blob
   plainPng: Blob
@@ -22,39 +33,31 @@ export interface SimplifiedImageComparison {
   height: number
 }
 
-export function simplifyImage(blob: Blob, format: 'comparison', options?: AnaV2Options): Promise<SimplifiedImageComparison>
-export function simplifyImage(blob: Blob, format: 'json', options?: AnaV2Options): Promise<SimplifiedImageData>
-export function simplifyImage(blob: Blob, format?: 'png', options?: AnaV2Options): Promise<Blob>
-export async function simplifyImage(blob: Blob, format: 'json' | 'png' | 'comparison' = 'png', options?: AnaV2Options): Promise<SimplifiedImageData | SimplifiedImageComparison | Blob> {
-  const url = URL.createObjectURL(blob)
-  try {
-    const image = new Image()
-    image.src = url
-    await image.decode()
-
-    const analysis = await analyzeImage(image, options)
-    const { width, height, palette, labels, alpha } = analysis
-
-    if (format === 'json') {
-      return { width, height, palette, labels: Array.from(labels), ...(alpha ? { alpha: Array.from(alpha) } : {}) }
+export function simplifyImage(blob: Blob, format: 'comparison', options?: AnaOptions): Promise<SimplifiedImageComparison>
+export function simplifyImage(blob: Blob, format: 'regions', options?: AnaOptions): Promise<SimplifiedImageRegions>
+export function simplifyImage(blob: Blob, format: 'json', options?: AnaOptions): Promise<SimplifiedImageData>
+export function simplifyImage(blob: Blob, format?: 'png', options?: AnaOptions): Promise<Blob>
+export async function simplifyImage(blob: Blob, format: 'json' | 'png' | 'comparison' | 'regions' = 'png', options?: AnaOptions): Promise<SimplifiedImageData | SimplifiedImageComparison | SimplifiedImageRegions | Blob> {
+  return new Promise<SimplifyImageResult>((resolve, reject) => {
+    const worker = new Worker(new URL('./simplify.worker.ts', import.meta.url), { type: 'module' })
+    const fail = (error: unknown) => {
+      worker.terminate()
+      reject(error)
     }
-
-    const { pixels } = createColorPixels(analysis)
-    const canvas = document.createElement('canvas')
-    canvas.width = width
-    canvas.height = height
-    const context = canvas.getContext('2d')
-    if (!context) throw new Error('无法创建简化图片画布')
-    context.putImageData(new ImageData(new Uint8ClampedArray(pixels), width, height), 0, 0)
-
-    const original = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(value => value ? resolve(value) : reject(new Error('生成简化图片失败')), 'image/png')
-    })
-    const indexed = await encodeIndexedPng(analysis).catch(() => null)
-    const png = indexed && indexed.size < original.size ? indexed : original
-    if (format === 'comparison') return { png, plainPng: original, colorCount: palette.length, width, height }
-    return png
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+    worker.onmessage = ({ data }: MessageEvent<SimplifyImageReply>) => {
+      worker.terminate()
+      if ('error' in data) reject(new Error(data.error))
+      else resolve(data.result)
+    }
+    worker.onerror = (event) => {
+      event.preventDefault()
+      fail(new Error(event.message || '图片简化线程运行失败'))
+    }
+    worker.onmessageerror = () => fail(new Error('无法读取图片简化结果'))
+    try {
+      worker.postMessage({ blob, format, options: options ? { ...options } : undefined } satisfies SimplifyImageRequest)
+    } catch (error) {
+      fail(error)
+    }
+  })
 }

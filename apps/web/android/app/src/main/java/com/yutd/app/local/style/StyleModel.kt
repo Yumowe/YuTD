@@ -9,7 +9,7 @@ import androidx.room.*
 data class StyleRecord(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String = "我的样式",
-    val showMode: Int = 1,
+    val showMode: Int = 0,
     val backgroundPrimary: String = "#f5f7fb",
     val backgroundSecondary: String = "#ffffff",
     val textPrimary: String = "#172033",

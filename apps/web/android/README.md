@@ -82,11 +82,21 @@ AuthService::class to false,
 
 ## 数据和升级
 
-数据库位于应用私有目录的 `databases/yutd.db`。Room 当前结构版本为 2，通过 `@AutoMigration(from = 1, to = 2)` 保留已有设置和样式，结构记录保存在 `app/schemas`。按业务目录拆分没有改变表、字段、索引或数据库标识，因此无需再增加版本号。不使用清库升级。旧版样式没有时间字段，升级时为资源排序补入固定的历史基准时间。
+数据库位于应用私有目录的 `databases/yutd.db`，当前开发版本的 Room 结构基线为 1，结构记录保存在 `app/schemas`。目前尚无用户，不保留历史升级迁移；新库直接创建最终结构。任务提醒保存为 UTC 毫秒整数，接口返回 ISO 日期时间。提醒开关、提前分钟数及标题、正文模板统一属于 preferences。
+
+默认样式来自 `shared/assets/style-presets.json`，由 Android Gradle 作为 assets 打包，后端新库初始化也读取同一份数据。新装应用在建表后写入海盐晴空、紫藤纸笺、拿铁时光、抹茶庭院、冬夜霜蓝、莓紫夜航六套预设，保留各自的颜色，手机预设统一默认使用系统字体和简洁显示模式。
 
 图片存放在 `files/images`，上传时通过 256 KiB 分片进入 `cache/image-uploads`，校验完整性、格式、大小和像素后保存；失败和取消会清理临时文件。每个文件最多 20 MiB，图片最多 8000 万像素，简化图必须是 PNG。AVIF 解码能力取决于 Android 版本。图片读取通过 Capacitor 本地文件 URL 返回 Blob，不将整张文件编码后放进一次桥接响应。
 
-配置只作用于当前设备。本地登录默认关闭；启用时需设置密码，密码使用带随机盐的 PBKDF2 保存，随机会话令牌仅存散列和有效期，公开配置不返回密码材料。登录成功时原生同步保存并刷盘 WebView Cookie，避免立即退出时丢失登录状态。令牌与 Elysia 服务端令牌独立。`system.host` / `system.port` 作为兼容配置保留，不会让手机监听端口。`enableReminder` 与目前 Web 端一样是配置开关，不代表已经调度 Android 系统通知。
+配置只作用于当前设备。本地登录默认关闭；启用时需设置密码，密码使用带随机盐的 PBKDF2 保存，随机会话令牌仅存散列和有效期，公开配置不返回密码材料。登录成功时原生同步保存并刷盘 WebView Cookie，避免立即退出时丢失登录状态。令牌与 Elysia 服务端令牌独立。`system.host` / `system.port` 作为兼容配置保留，不会让手机监听端口。
+
+## 提醒
+
+`@capacitor/local-notifications` 负责通知权限、渠道、调度及重启恢复；Kotlin 仅存储并提供提醒所需的数据。`reminders.client.ts` 通过 `useApi.read()` 检查版本，读取原生快照后生成所有后续课程实例、未完成任务的截止前提醒与单独设置的提醒；保存相关数据时比较、增删通知；应用启动或回到前台时重新提交未到期通知，恢复可能被系统取消的闹钟。关闭开关、完成或取消任务会撤销待发通知，不使用 JS 定时器投递通知。
+
+标题与正文分别保存，均可使用 `{{title}}`、`{{time}}`、`{{task}}`、`{{event}}`、`{{tips}}`；任务还支持 `{{description}}`，默认正文为截止时间下一行接描述；仅课程支持 `{{location}}`，优先采用排课地点。关联任务、课程只输出名称，提示只输出正文。课程时间按偏好时区、阶段日期、周次与周几展开。相同任务同一时间的手动提醒和截止前提醒合并。
+
+首次开启提醒时请求系统通知权限；“允许准时提醒”单独打开系统授权页，未授权时使用非精确通知，可能延迟。插件管理已保存通知，应用关闭后无需 WebView 继续运行。
 
 ## 构建和安装
 
@@ -113,6 +123,29 @@ bunx cap sync android
 
 输出为 `app/build/outputs/apk/debug/app-debug.apk`。覆盖安装保留应用数据。
 
+## 图标资源
+
+启动图标、自适应图标与圆形图标来自 `apps/web/public/logo.svg`。启动页通过 AndroidX SplashScreen 显示白底居中 logo，`drawable/splash_logo.xml` 直接复用图标前景，各个方向、密度与深色模式共用，不保存整屏启动图片。在 `apps/web` 运行以下命令重新生成图标：
+
+```powershell
+bunx --package @capacitor/assets capacitor-assets generate --android --assetPath public --iconBackgroundColor '#f5f7fb' --iconBackgroundColorDark '#f5f7fb'
+```
+
+当前启动图标在生成结果上增加了留白：自适应图标的前景 inset 为 22%，普通与圆形 PNG 居中缩小至生成尺寸的 85%。重新生成资源后需保留这两项调整，并删除工具额外生成的 `splash.png`，保留 `splash_logo.xml`。
+
 ## 全面屏
 
 前端 viewport 使用 `viewport-fit=cover`，Capacitor 自带的 `SystemBars` 处理系统栏安全区，页面通过 `--app-safe-*` 避让。状态栏和导航栏保持可见。Android WebView 140 以下自动使用原生安全区兼容布局。
+
+## 系统返回
+
+Android 通过 `@capacitor/app` 的 `backButton` 事件统一处理系统返回键和返回手势，优先级如下：
+
+1. 关闭最上层弹窗；若弹窗不可关闭，则消费本次返回。
+2. 退出编辑模式。
+3. 非首页且有应用内历史记录时返回上一页，否则回到首页。
+4. 首页将应用退到后台，保留当前状态。
+
+监听在 `native.client.ts` 中注册，Vue 应用实例销毁或开发热更新时清理。浏览器不注册原生返回监听。安装或更新插件后，需重新执行 `bunx cap sync android` 并打包安装。
+
+设置页保留通用提示：部分手机可能需要开启自启动，才能在 App 未运行时收到通知。Android 可点击「自启动权限设置」前往系统页面；不判断手机品牌，也不与提醒开关绑定。直达入口不可用时回退到 YuTD 应用设置，需要用户手动开启。

@@ -2,27 +2,38 @@
 import TaskBlock from '~/components/preview/Task/TaskBlock.vue'
 import AppPopup from '~/components/common/AppPopup.vue'
 import BackgroundLayout from '~/components/image/BackgroundLayout.vue'
+import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import { BackgroundContextKey } from '~/components/image/background'
 import { GlassLayerKey } from '~/components/preview/card/glass/edges'
 
 const props = defineProps<{
+  /** 写入任务状态或延期变更。 */
+  changeTask?: ChangeTask
+  /** 任务时间线的像素位置。 */
   top: number
+  /** 计划时间线或截止时间线。 */
   kind: 'plan' | 'due'
+  /** 是否使用紧凑标记避免遮挡。 */
   covered?: boolean
+  /** 紧凑标记的横向偏移。 */
   markerOffset?: number
+  /** 任务 ID。 */
   taskId?: number
+  /** 任务名称。 */
   taskName?: string
+  /** 任务计划时间。 */
   plannedDate?: Date
+  /** 任务截止时间。 */
   dueDate?: Date
+  /** 用于详情预览的完整任务数据。 */
   task?: ApiData<Api['api']['task']['get']>[number]
 }>()
 
-const popoverId = useId()
 const background = inject(BackgroundContextKey, null)
+
 const glassLayer = inject(GlassLayerKey, null)
+
 const { timeZone } = useSystemTime()
-const anchor = ref<HTMLButtonElement | null>(null)
-const opened = ref(false)
 
 function dateToTimeString(date: Date): string {
   const parts = clockParts(date, timeZone.value)
@@ -31,14 +42,7 @@ function dateToTimeString(date: Date): string {
 
   return `${hours}:${minutes}`
 }
-const lineStyle = computed(() => ({
-  top: `${props.top}px`
-}))
-const labelStyle = computed(() => ({ top: `${props.top}px` }))
-const markerStyle = computed(() => ({
-  top: `${props.top}px`,
-  right: `calc(3px + ${(props.markerOffset ?? 0) / 18} * var(--task-marker-size))`
-}))
+
 const timeText = computed(() => {
   if (props.kind === 'plan' && props.plannedDate) {
     return dateToTimeString(props.plannedDate)
@@ -48,6 +52,23 @@ const timeText = computed(() => {
     return ''
   }
 })
+
+const popoverId = useId()
+
+const anchor = ref<HTMLButtonElement | null>(null)
+
+const opened = ref(false)
+
+const lineStyle = computed(() => ({
+  top: `${props.top}px`
+}))
+
+const labelStyle = computed(() => ({ top: `${props.top}px` }))
+
+const markerStyle = computed(() => ({
+  top: `${props.top}px`,
+  right: `calc(3px + ${(props.markerOffset ?? 0) / 18} * var(--task-marker-size))`
+}))
 </script>
 
 <template>
@@ -116,12 +137,14 @@ const timeText = computed(() => {
         :analysis="glassLayer?.analysis.value"
       >
         <TaskBlock
+          :change-task="props.changeTask"
           :task="task"
           :detail="3"
         />
       </BackgroundLayout>
       <TaskBlock
         v-else
+        :change-task="props.changeTask"
         :task="task"
         :detail="3"
       />

@@ -5,23 +5,36 @@ import { editFieldErrors, editFieldStep, editFieldType, editFieldValues } from '
 import type { EditField, EditValues } from '~/utils/editFields'
 
 const props = withDefaults(defineProps<{
+  /** 可编辑字段的定义。 */
   fields: EditField[]
+  /** 字段的当前值。 */
   values: EditValues
+  /** 保存字段值的方法。 */
   save: (values: EditValues) => unknown | Promise<unknown>
+  /** 弹窗标题。 */
   title?: string
+  /** 弹层定位的锚点元素。 */
   anchor?: HTMLElement | null
 }>(), { title: 'QAQ', anchor: null })
+
 const opened = defineModel<boolean>('open', { default: false })
-const formId = useId()
+
 const emit = defineEmits<{
   change: [values: EditValues]
   saved: [values: EditValues]
 }>()
+
 const draft = ref<EditValues>({})
-const saving = ref(false)
-const error = ref('')
+
 const errors = computed(() => editFieldErrors(props.fields, draft.value))
+
 const valid = computed(() => Object.keys(errors.value).length === 0)
+
+const formId = useId()
+
+const saving = ref(false)
+
+const error = ref('')
 
 watch(opened, (open) => {
   error.value = ''

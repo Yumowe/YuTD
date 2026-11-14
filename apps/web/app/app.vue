@@ -1,26 +1,24 @@
 <script setup lang="ts">
+import type AppSidebar from '~/components/common/AppSidebar.vue'
 import { CardStyleKey } from '~/components/preview/card/cardMaterial'
 
-const isLogin = /^\/login\/?$/.test(useRouter().currentRoute.value.path)
-const writePreferencesClient = useApi({
-  key: 'preferences',
-  read: api => api.api.preferences.get(),
-  write: (api, value: ApiData<Api['api']['preferences']['get']>) => api.api.preferences.put(value)
+const pageData = shallowRef<InstanceType<typeof AppSidebar>['$props']>({})
+const isLoginPage = /^\/login\/?$/.test(useRouter().currentRoute.value.path)
+const { $native } = useNuxtApp()
+const { preferences, initialize } = useAppPeferences()
+const { style, initialize: initializeStyle } = useAppStyle()
+onMounted(async () => {
+  if (isLoginPage) return
+  await initialize().catch(() => {})
+  await initializeStyle().catch(() => {})
 })
-const writePreferencesClientState = useAsyncData(writePreferencesClient.key, writePreferencesClient.read, { deep: true, immediate: !isLogin })
-const { data: preferences } = writePreferencesClientState
 const { mode } = useSystemStatus()
 const sidebarPreview = ref<number | null>(null)
-const sidebarSaving = ref(false)
 const sidebarResizing = ref(false)
 const bottomSidebar = ref(false)
 const sidebarMinimum = computed(() => bottomSidebar.value ? 76 : 64)
 const clampSidebarSize = (value: number) => Math.min(135, Math.max(sidebarMinimum.value, Math.round(value)))
 const sidebarSize = computed(() => clampSidebarSize(sidebarPreview.value ?? preferences.value?.sidebarWidth ?? 64))
-const resizeClient = useApi({
-  key: 'preferences',
-  write: (api, value: { sidebarWidth: number }) => api.api.preferences.patch(value)
-})
 let sidebarDrag: { pointerId: number, start: number, size: number, bottom: boolean, element: HTMLElement } | null = null
 let sidebarMedia: MediaQueryList | undefined
 
@@ -38,27 +36,19 @@ function cancelSidebarResize(event?: Event) {
   sidebarPreview.value = null
 }
 
-async function saveSidebarSize(value: number) {
-  if (sidebarSaving.value || !preferences.value) return
+function saveSidebarSize(value: number) {
+  if (!preferences.value) return
   const size = clampSidebarSize(value)
   if (size === preferences.value.sidebarWidth) {
     sidebarPreview.value = null
     return
   }
-  sidebarPreview.value = size
-  sidebarSaving.value = true
-  try {
-    preferences.value = await resizeClient.write({ sidebarWidth: size })
-  } catch {
-    // useApi 已统一上报，失败后恢复已保存的尺寸。
-  } finally {
-    sidebarPreview.value = null
-    sidebarSaving.value = false
-  }
+  preferences.value.sidebarWidth = size
+  sidebarPreview.value = null
 }
 
 function startSidebarResize(event: PointerEvent) {
-  if (mode.value !== 'edit' || !preferences.value || sidebarSaving.value || event.button !== 0 || sidebarDrag) return
+  if (mode.value !== 'edit' || !preferences.value || event.button !== 0 || sidebarDrag) return
   const element = event.currentTarget as HTMLElement
   element.setPointerCapture(event.pointerId)
   event.preventDefault()
@@ -89,7 +79,7 @@ function finishSidebarResize(event: PointerEvent) {
 }
 
 function resizeSidebarWithKeyboard(event: KeyboardEvent) {
-  if (mode.value !== 'edit' || sidebarSaving.value || sidebarDrag) return
+  if (mode.value !== 'edit' || sidebarDrag) return
   const increments: Record<string, number> = bottomSidebar.value ? { ArrowUp: 1, ArrowDown: -1 } : { ArrowRight: 1, ArrowLeft: -1 }
   const increment = increments[event.key]
   if (increment === undefined && event.key !== 'Home' && event.key !== 'End') return
@@ -104,28 +94,12 @@ function updateSidebarLayout() {
 watch(mode, (value) => {
   if (value !== 'edit') cancelSidebarResize()
 })
-async function writePreferences(value: Parameters<typeof writePreferencesClient.write>[0]) {
-  try {
-    const result = await writePreferencesClient.write(value)
-    await writePreferencesClientState.refresh()
-    return result
-  } catch {
-    return undefined
-  }
-}
-const styleId = computed(() => preferences.value?.activeStyleId ?? null)
-const styleClient = useApi({
-  key: () => `style:${styleId.value ?? 'none'}`,
-  read: async api => styleId.value === null ? null : api.api.style({ id: styleId.value }).get()
-})
-const styleClientState = useAsyncData(styleClient.key, styleClient.read, { deep: true, immediate: !isLogin })
-const { data: style } = styleClientState
 provide(CardStyleKey, computed(() => ({
   showMode: style.value?.showMode ?? 0,
   backgroundColor: style.value?.backgroundSecondary ?? '#ffffff'
 })))
 
-const fontStack = computed(() => getAppFontStack(style.value?.fontFamily ?? 'system-ui'))
+const fontStack = computed(() => getAppFontStack($native || bottomSidebar.value ? 'system-ui' : style.value?.fontFamily ?? 'system-ui'))
 const theme = computed(() => ({
   '--background-primary': style.value?.backgroundPrimary ?? '#f5f7fb',
   '--background-secondary': style.value?.backgroundSecondary ?? '#ffffff',
@@ -147,8 +121,8 @@ const description = 'YuTD 任务管理应用'
 const { update } = useSystemTime()
 let clientMounted = false
 
-async function detectTimeZone() {
-  if (isLogin || !clientMounted || !preferences.value?.timeZoneAutomatic)
+function detectTimeZone() {
+  if (isLoginPage || !clientMounted || !preferences.value?.timeZoneAutomatic)
     return
   let detected: string
   try {
@@ -157,7 +131,7 @@ async function detectTimeZone() {
     detected = inferTimeZone(navigator.language || preferences.value?.defaultLocale || 'zh-CN')
   }
   if (preferences.value.timeZone !== detected)
-    await writePreferences({ ...preferences.value, timeZone: detected })
+    preferences.value.timeZone = detected
 }
 watch(() => [preferences.value?.timeZoneAutomatic, preferences.value?.timeZone], detectTimeZone)
 
@@ -208,13 +182,13 @@ useSeoMeta({
 </script>
 
 <template>
-  <NuxtPage v-if="isLogin" />
+  <NuxtPage v-if="isLoginPage" />
   <div
     v-else
     class="app-layout"
     :class="{ 'app-layout--resizing': sidebarResizing }"
   >
-    <AppSidebar />
+    <AppSidebar v-bind="pageData" />
     <div
       v-if="mode === 'edit' && preferences"
       class="app-sidebar-resize"
@@ -225,7 +199,6 @@ useSeoMeta({
       :aria-valuenow="sidebarSize"
       :aria-valuemin="sidebarMinimum"
       :aria-valuemax="135"
-      :aria-disabled="sidebarSaving"
       title="拖动调整侧栏尺寸，松开保存"
       @pointerdown="startSidebarResize"
       @pointermove="moveSidebarResize"
@@ -235,7 +208,10 @@ useSeoMeta({
       @keydown="resizeSidebarWithKeyboard"
     />
     <div class="app-main">
-      <NuxtPage :keepalive="{ max: 4 }" />
+      <NuxtPage
+        :keepalive="{ max: 4 }"
+        @page-data="pageData = $event"
+      />
     </div>
   </div>
 </template>

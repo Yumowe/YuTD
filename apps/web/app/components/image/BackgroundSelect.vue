@@ -46,7 +46,7 @@ const client = useApi({
 const backgroundClient = useApi({
   key: () => `image:background:${props.backgroundKey ?? 'none'}`,
   read: async api => props.backgroundKey ? api.api.image.background.get({ query: { backgroundKey: props.backgroundKey } }) : null,
-  write: (api, value: { key: string, imageId: string, position?: ImageCropInfo }) => api.api.image.background.patch({
+  write: (api, value: { key: string, imageId: string | null, position?: ImageCropInfo }) => api.api.image.background.patch({
     backgroundKey: value.key, imageId: value.imageId, position: value.position
   })
 })
@@ -136,7 +136,7 @@ async function loadImage(id: string) {
 async function applySelection(value: BackgroundSelection | null) {
   const previous = selected.value
   selected.value = value
-  if (value || previous) emit('change', value)
+  emit('change', value)
   emit('loading-change', false)
   await nextTick()
   release(previous)
@@ -144,6 +144,22 @@ async function applySelection(value: BackgroundSelection | null) {
 
 function randomNumber() {
   return crypto.getRandomValues(new Uint32Array(1))[0]!
+}
+
+async function clearBackground() {
+  if (loading.value) return
+  const key = props.backgroundKey
+  const version = ++restoreVersion
+  loading.value = true
+  try {
+    if (key && !await backgroundClient.write({ key, imageId: null }).catch(() => undefined)) return
+    if (controller.signal.aborted || version !== restoreVersion) return
+    clearDraft()
+    opened.value = false
+    await applySelection(null)
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(() => {
@@ -233,9 +249,6 @@ async function chooseRandom() {
   }
 }
 
-watch(() => uploader.value?.uploading, (busy, previous) => {
-  if (previous && !busy) void refresh()
-})
 onBeforeUnmount(() => {
   controller.abort()
   clearDraft()
@@ -268,7 +281,7 @@ onBeforeUnmount(() => {
       v-model:open="opened"
       class="background-select__dialog"
       aria-label="选择背景"
-      :dismissible="!loading && !uploader?.uploading"
+      :dismissible="!loading"
       @close="clearDraft"
     >
       <header class="background-select__header">
@@ -300,7 +313,7 @@ onBeforeUnmount(() => {
             v-if="!draft"
             class="button image-select-button"
             type="button"
-            :disabled="loading || uploader?.uploading"
+            :disabled="loading"
             aria-label="上传图片"
             title="上传图片"
             @click="uploader?.open()"
@@ -315,7 +328,7 @@ onBeforeUnmount(() => {
             class="button"
             type="button"
             aria-label="关闭"
-            :disabled="loading || uploader?.uploading"
+            :disabled="loading"
             @click="opened = false"
           >
             ×
@@ -334,7 +347,11 @@ onBeforeUnmount(() => {
         v-show="!draft"
         class="background-select__upload"
       >
-        <ImageUploader ref="uploader" />
+        <ImageUploader
+          ref="uploader"
+          @submitted="opened = false"
+          @uploaded="refresh"
+        />
       </div>
       <template v-if="!draft">
         <p
@@ -347,6 +364,32 @@ onBeforeUnmount(() => {
           v-else
           class="background-select__gallery"
         >
+          <button
+            class="background-select__none"
+            type="button"
+            aria-label="不使用背景图"
+            title="不使用背景图"
+            @click="clearBackground"
+          >
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+              />
+              <path d="m4.93 4.93 14.14 14.14" />
+            </svg>
+          </button>
           <button
             v-for="image in images"
             :key="image.id"
@@ -406,4 +449,5 @@ onBeforeUnmount(() => {
   background: transparent;
   cursor: pointer;
 }
+.background-select__gallery > .background-select__none { display: grid; place-items: center; min-height: 120px; color: var(--text-secondary); background: var(--background-primary); }
 </style>

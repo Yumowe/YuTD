@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core'
 import { createApi, requestApiData } from '~/utils/api'
 
 export default defineNuxtPlugin({
+  name: 'api',
   dependsOn: ['native'],
   setup(app) {
     const router = useRouter()

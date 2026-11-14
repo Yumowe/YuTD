@@ -2,23 +2,40 @@
 import AppPopup from '../common/AppPopup.vue'
 
 type Phase = ApiData<Api['api']['phase']['post']>
-const props = defineProps<{ open: boolean, phase?: Phase | null }>()
-const emit = defineEmits<{ 'update:open': [open: boolean], 'saved': [phase: Phase] }>()
+
+const props = defineProps<{ /** 是否打开弹窗。 */ open: boolean, /** 已有阶段；为空时新建。 */ phase?: Phase | null }>()
+
+const emit = defineEmits<{ 'update:open': [open: boolean], 'saved': [phase: Phase], 'deleted': [phaseId: Phase['id']] }>()
+
+const { preferences } = useAppPeferences()
+
 const { now, timeZone } = useSystemTime()
-const formId = useId()
+
 const form = reactive({ name: '', startDate: '', endDate: '' })
+
+const client = reactive(useApi({
+  key: 'phase:save',
+  write: (api, data: Parameters<Api['api']['phase']['post']>[0]) => props.phase
+    ? api.api.phase({ id: props.phase.id }).patch(data)
+    : api.api.phase.post(data)
+}))
+
+const deleteClient = reactive(useApi({
+  key: 'phase:delete',
+  write: (api, id: Phase['id']) => api.api.phase({ id }).delete()
+}))
+
+const formId = useId()
+
 const saving = ref(false)
+
+const deleteCandidate = ref(false)
+
 const error = ref('')
-const client = useApi({
-  key: 'phases',
-  write: (api, value: { id?: number, name: string, startDate: string, endDate: string }) => {
-    const { id, ...data } = value
-    return id === undefined ? api.api.phase.post(data) : api.api.phase({ id }).patch(data)
-  }
-})
 
 watch([() => props.open, () => props.phase], ([open, phase]) => {
   if (!open) return
+  deleteCandidate.value = false
   const day = calendarDate(now.value ?? new Date(), timeZone.value)
   const monday = addCalendarDays(day, 1 - calendarWeekday(day))
   Object.assign(form, {
@@ -28,6 +45,26 @@ watch([() => props.open, () => props.phase], ([open, phase]) => {
   })
   error.value = ''
 }, { immediate: true })
+
+async function removePhase() {
+  if (!props.phase || saving.value) return
+  if (!deleteCandidate.value) {
+    deleteCandidate.value = true
+    return
+  }
+  const id = props.phase.id
+  saving.value = true
+  try {
+    await deleteClient.write(id)
+    if (preferences.value?.defaultPhaseId === id) preferences.value.defaultPhaseId = null
+    emit('deleted', id)
+    emit('update:open', false)
+  } catch {
+    return
+  } finally {
+    saving.value = false
+  }
+}
 
 async function save() {
   if (saving.value) return
@@ -46,7 +83,7 @@ async function save() {
       return
     }
     saving.value = true
-    const phase = await client.write({ id: props.phase?.id, ...form, name: form.name.trim() })
+    const phase = await client.write({ ...form, name: form.name.trim() })
     emit('saved', phase)
     emit('update:open', false)
   } catch (cause) {
@@ -66,6 +103,28 @@ async function save() {
     :close-on-outside="false"
     @update:open="emit('update:open', $event)"
   >
+    <template
+      v-if="phase"
+      #header-actions
+    >
+      <button
+        class="button phase-edit-popup__delete"
+        type="button"
+        :disabled="saving"
+        @click="removePhase"
+      >
+        {{ deleteClient.write.saving.value ? '正在删除……' : deleteCandidate ? '确认删除阶段' : '删除阶段' }}
+      </button>
+      <button
+        v-if="deleteCandidate"
+        class="button"
+        type="button"
+        :disabled="saving"
+        @click="deleteCandidate = false"
+      >
+        取消
+      </button>
+    </template>
     <form
       class="panel-stack"
       :aria-busy="saving"
@@ -141,4 +200,5 @@ async function save() {
 .phase-edit-popup { --popup-width: 440px; }
 .phase-edit-popup p { margin: 0; font-size: 12px; }
 .phase-edit-popup__error { color: #b42336; }
+.phase-edit-popup__delete { color: #dc3545; }
 </style>

@@ -7,59 +7,144 @@ import { CardStyleKey } from '../preview/card/cardMaterial'
 import { weekdays } from '~/utils/date'
 import { getScheduleData, parseWeeks } from '~/utils/schedule'
 
-export interface EditableSchedule {
-  id: number
-  weekday: number
-  startTime: string
-  endTime: string
-  weeks: unknown
-  location: string | null
-  organizer: string | null
-}
+export type EditableEvent = ApiData<Api['api']['event']['get']>[number]
 
-export interface EditableEvent {
-  id: number
-  phaseId: number
-  name: string
-  location: string | null
-  organizer: string | null
-  color: string | null
-  schedules: EditableSchedule[]
-}
+export type EditableSchedule = EditableEvent['schedules'][number]
 
 const props = withDefaults(defineProps<{
+  /** 已有事件；为空时新建。 */
   event?: EditableEvent | null
+  /** 所属阶段 ID。 */
   phaseId: number
+  /** 阶段总周数。 */
   weekCount: number
+  /** 是否显示继续新建的入口。 */
   allowNew?: boolean
 }>(), { allowNew: true })
-const theme = inject(CardStyleKey, undefined)
-const fancy = computed(() => theme?.value.showMode === 1)
-const backgroundSelection = shallowRef<BackgroundSelection | null>(null)
-const backgroundPending = ref(true)
-watch([fancy, () => props.phaseId], () => {
-  backgroundSelection.value = null
-  backgroundPending.value = true
-})
+
 const emit = defineEmits<{
   'saved': [event: EditableEvent]
   'new': []
   'add-task': [event: EditableEvent]
+  'deleted': [eventId: EditableEvent['id']]
 }>()
+
 const activeEvent = shallowRef<EditableEvent | null>(null)
+
+const eventColors = [
+  '#1D4ED8', '#4338CA', '#6D28D9', '#A21CAF', '#BE185D', '#B91C1C', '#C2410C', '#047857', '#0E7490',
+  '#BFDBFE', '#C7D2FE', '#DDD6FE', '#E9D5FF', '#FBCFE8', '#FECACA', '#FED7AA', '#A7F3D0', '#A5F3FC'
+] as const
+
 const eventForm = reactive({ name: '', location: '', organizer: '', color: '#172033' as string | null })
+
 const scheduleForm = reactive({ weekday: 1, weeks: [] as number[], startTime: '', endTime: '', location: '', organizer: '' })
+
 const selectedScheduleId = ref<number | null>(null)
-const saving = ref<'event' | 'schedule' | null>(null)
-const eventError = ref('')
-const scheduleError = ref('')
-const element = ref<HTMLElement | null>(null)
+
+const newTips = ref<string[]>([])
+
 let revision = 0
+
+const schedules = computed(() => activeEvent.value?.schedules ?? [])
+
+function loadEvent(event: EditableEvent | null) {
+  revision++
+  saving.value = null
+  newTips.value = []
+  deleteCandidate.value = false
+  // 只编辑副本，初始值和排课的周数数组都不回写父组件。
+  activeEvent.value = event ? { ...event, schedules: event.schedules.map(schedule => ({ ...schedule, weeks: parseWeeks(schedule.weeks) })) } : null
+  Object.assign(eventForm, {
+    name: event?.name ?? '', location: event?.location ?? '', organizer: event?.organizer ?? '',
+    color: event ? event.color : eventColors[Math.floor(Math.random() * eventColors.length)]!
+  })
+  eventError.value = ''
+  selectSchedule(activeEvent.value?.schedules[0])
+}
+
+function eventData() {
+  const name = eventForm.name.trim()
+  if (!name) throw new Error('请输入事件名称')
+  if (newTips.value.some(content => !content.trim())) throw new Error('请输入提示内容，或删除空白提示')
+  return { name, location: eventForm.location.trim(), organizer: eventForm.organizer.trim(), color: eventForm.color ?? undefined }
+}
+
+function scheduleData() {
+  if (!scheduleForm.weeks.length) throw new Error('请至少选择一周')
+  const value = getScheduleData({ ...scheduleForm, weeks: scheduleForm.weeks.join(',') })
+  if (value.weeks.some(week => week > props.weekCount)) throw new Error(`周数不能超过所属阶段的 ${props.weekCount} 周`)
+  return { ...value, location: scheduleForm.location.trim(), organizer: scheduleForm.organizer.trim() }
+}
+
+const eventClient = reactive(useApi({
+  key: 'event:save',
+  write: (api, data: Parameters<Api['api']['event']['post']>[0]) => activeEvent.value
+    ? api.api.event({ id: activeEvent.value.id }).patch({ name: data.name, location: data.location, organizer: data.organizer, color: data.color })
+    : api.api.event.post(data)
+}))
+
+const scheduleClient = reactive(useApi({
+  key: 'event-schedule:save',
+  write: (api, data: Parameters<Api['api']['event-schedule']['post']>[0]) => selectedScheduleId.value === null
+    ? api.api['event-schedule'].post(data)
+    : api.api['event-schedule']({ id: selectedScheduleId.value }).patch(data)
+}))
+
+const tipClient = reactive(useApi({
+  key: 'event:tips:save',
+  write: (api, data: Parameters<Api['api']['tip']['post']>[0]) => api.api.tip.post(data)
+}))
+
+const deleteClient = reactive(useApi({
+  key: 'event:delete',
+  write: (api, id: EditableEvent['id']) => api.api.event({ id }).delete()
+}))
+
+async function saveTips(event: EditableEvent, current: number) {
+  let saved = event
+  while (newTips.value.length && current === revision) {
+    const tip = await tipClient.write({ content: newTips.value[0]!.trim(), eventIds: [event.id] })
+    if (current !== revision) return saved
+    newTips.value.shift()
+    saved = { ...saved, tips: [...saved.tips, tip] }
+    activeEvent.value = saved
+  }
+  return saved
+}
+
+const theme = inject(CardStyleKey, undefined)
+
+const fancy = computed(() => theme?.value.showMode === 1)
+
+const backgroundSelection = shallowRef<BackgroundSelection | null>(null)
+
+const backgroundPending = ref(true)
+
+const saving = ref<'event' | 'schedule' | 'delete' | null>(null)
+
+const deleteCandidate = ref(false)
+
+const eventError = ref('')
+
+const scheduleError = ref('')
+
+const element = ref<HTMLElement | null>(null)
+
 const eventColor = computed({
   get: () => eventForm.color ?? '#172033',
   set: (value: string) => { eventForm.color = value }
 })
-const schedules = computed(() => activeEvent.value?.schedules ?? [])
+
+watch([fancy, () => props.phaseId], () => {
+  backgroundSelection.value = null
+  backgroundPending.value = true
+})
+
+watch([() => props.event, () => props.phaseId], ([event, phaseId], previous) => {
+  if (previous && phaseId === previous[1] && event?.id === activeEvent.value?.id) return
+  loadEvent(event ?? null)
+}, { immediate: true })
 
 function selectSchedule(schedule?: EditableSchedule) {
   selectedScheduleId.value = schedule?.id ?? null
@@ -74,65 +159,44 @@ function selectSchedule(schedule?: EditableSchedule) {
   scheduleError.value = ''
 }
 
-function loadEvent(event: EditableEvent | null) {
-  revision++
-  saving.value = null
-  // 只编辑副本，初始值和排课的周数数组都不回写父组件。
-  activeEvent.value = event ? { ...event, schedules: event.schedules.map(schedule => ({ ...schedule, weeks: parseWeeks(schedule.weeks) })) } : null
-  Object.assign(eventForm, {
-    name: event?.name ?? '', location: event?.location ?? '', organizer: event?.organizer ?? '', color: event ? event.color : '#172033'
-  })
-  eventError.value = ''
-  selectSchedule(activeEvent.value?.schedules[0])
-}
-
-watch([() => props.event, () => props.phaseId], ([event, phaseId], previous) => {
-  if (previous && phaseId === previous[1] && event?.id === activeEvent.value?.id) return
-  loadEvent(event ?? null)
-}, { immediate: true })
-
 function startNew() {
   loadEvent(null)
   emit('new')
 }
 
-function eventData() {
-  const name = eventForm.name.trim()
-  if (!name) throw new Error('请输入事件名称')
-  return { name, location: eventForm.location.trim(), organizer: eventForm.organizer.trim(), color: eventForm.color ?? undefined }
+async function removeEvent() {
+  if (!activeEvent.value || saving.value) return
+  if (!deleteCandidate.value) {
+    deleteCandidate.value = true
+    return
+  }
+  const id = activeEvent.value.id
+  const current = revision
+  saving.value = 'delete'
+  try {
+    await deleteClient.write(id)
+    if (current !== revision) return
+    loadEvent(null)
+    emit('deleted', id)
+  } catch {
+    return
+  } finally {
+    if (current === revision) saving.value = null
+  }
 }
 
-function scheduleData() {
-  if (!scheduleForm.weeks.length) throw new Error('请至少选择一周')
-  const value = getScheduleData({ ...scheduleForm, weeks: scheduleForm.weeks.join(',') })
-  if (value.weeks.some(week => week > props.weekCount)) throw new Error(`周数不能超过所属阶段的 ${props.weekCount} 周`)
-  return { ...value, location: scheduleForm.location.trim(), organizer: scheduleForm.organizer.trim() }
-}
-
-type ScheduleData = ReturnType<typeof scheduleData>
-const eventClient = useApi({
-  key: () => `event:${activeEvent.value?.id ?? 'new'}`,
-  write: (api, value: { data: ReturnType<typeof eventData>, schedule?: ScheduleData }) => activeEvent.value
-    ? api.api.event({ id: activeEvent.value.id }).patch(value.data)
-    : api.api.event.post({ ...value.data, phaseId: props.phaseId, schedules: value.schedule ? [value.schedule] : [] })
-})
-const scheduleClient = useApi({
-  key: () => `event-schedules:${activeEvent.value?.id ?? 'new'}`,
-  write: (api, value: { id: number | null, eventId: number, data: ScheduleData }) => value.id === null
-    ? api.api['event-schedule'].post({ ...value.data, eventId: value.eventId })
-    : api.api['event-schedule']({ id: value.id }).patch(value.data)
-})
-
-async function saveEvent() {
+async function submitEvent() {
   if (saving.value) return
   const current = revision
   eventError.value = ''
   try {
     const data = eventData()
     saving.value = 'event'
-    const saved = await eventClient.write({ data })
+    let saved = await eventClient.write({ ...data, phaseId: props.phaseId })
     if (current !== revision) return
     activeEvent.value = saved
+    saved = await saveTips(saved, current)
+    if (current !== revision) return
     Object.assign(eventForm, { name: saved.name, location: saved.location ?? '', organizer: saved.organizer ?? '', color: saved.color })
     emit('saved', saved)
   } catch (error) {
@@ -142,32 +206,37 @@ async function saveEvent() {
   }
 }
 
-async function saveSchedule() {
+async function submitSchedule() {
   if (saving.value) return
   const current = revision
   scheduleError.value = ''
   try {
     const data = scheduleData()
+    if (newTips.value.some(content => !content.trim())) throw new Error('请输入提示内容，或删除空白提示')
     // 新事件的第一条排课通过现有嵌套创建接口一次保存。
     const initialData = activeEvent.value ? null : eventData()
     saving.value = 'schedule'
     if (initialData) {
-      const saved = await eventClient.write({ data: initialData, schedule: data })
+      let saved = await eventClient.write({ ...initialData, phaseId: props.phaseId, schedules: [data] })
       if (current !== revision) return
       activeEvent.value = saved
-      Object.assign(eventForm, { name: saved.name, location: saved.location ?? '', organizer: saved.organizer ?? '', color: saved.color })
       selectSchedule(saved.schedules[0])
+      saved = await saveTips(saved, current)
+      if (current !== revision) return
+      Object.assign(eventForm, { name: saved.name, location: saved.location ?? '', organizer: saved.organizer ?? '', color: saved.color })
       emit('saved', saved)
     } else {
       const event = activeEvent.value!
-      const schedule = await scheduleClient.write({ id: selectedScheduleId.value, eventId: event.id, data })
+      const schedule = await scheduleClient.write({ ...data, eventId: event.id })
       if (current !== revision) return
       const next = selectedScheduleId.value === null
         ? [...event.schedules, schedule]
         : event.schedules.map(item => item.id === schedule.id ? schedule : item)
-      const saved = { ...event, schedules: next }
+      let saved = { ...event, schedules: next }
       activeEvent.value = saved
       selectSchedule(schedule)
+      saved = await saveTips(saved, current)
+      if (current !== revision) return
       emit('saved', saved)
     }
   } catch (error) {
@@ -191,6 +260,25 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
         {{ activeEvent ? '编辑事件' : '新建事件' }}
       </h2>
       <div class="edit-event__heading-actions">
+        <template v-if="activeEvent">
+          <button
+            class="button edit-event__delete"
+            type="button"
+            :disabled="Boolean(saving)"
+            @click="removeEvent"
+          >
+            {{ saving === 'delete' ? '正在删除……' : deleteCandidate ? '确认删除事件' : '删除事件' }}
+          </button>
+          <button
+            v-if="deleteCandidate"
+            class="button"
+            type="button"
+            :disabled="Boolean(saving)"
+            @click="deleteCandidate = false"
+          >
+            取消
+          </button>
+        </template>
         <button
           v-if="activeEvent"
           class="button"
@@ -228,7 +316,7 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
     <Background
       class="edit-event__background"
       :pending="fancy && backgroundPending"
-      :image="fancy ? backgroundSelection?.image ?? '/images/bg.png' : ''"
+      :image="fancy ? backgroundSelection?.image ?? '' : ''"
       :position="fancy ? backgroundSelection?.position : undefined"
       :simplified-image="fancy ? backgroundSelection?.simplifiedImage : undefined"
       :analysis="fancy ? backgroundSelection?.analysis : undefined"
@@ -270,7 +358,7 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
 
           <form
             class="panel-stack edit-event__schedule-form"
-            @submit.prevent="saveSchedule"
+            @submit.prevent="submitSchedule"
           >
             <div class="edit-event__heading">
               <h3 class="item-title">
@@ -403,7 +491,7 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
           <form
             class="edit-event__event-form"
             :style="{ color: textColor ?? 'var(--text-primary)' }"
-            @submit.prevent="saveEvent"
+            @submit.prevent="submitEvent"
           >
             <fieldset
               class="panel-stack"
@@ -445,6 +533,45 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
                   aria-label="事件颜色"
                 >
               </label>
+              <details class="panel-stack">
+                <summary>提示（选填）</summary>
+                <ul v-if="activeEvent?.tips.length">
+                  <li
+                    v-for="tip in activeEvent.tips"
+                    :key="tip.id"
+                  >
+                    {{ tip.content }}
+                  </li>
+                </ul>
+                <div
+                  v-for="(_, index) in newTips"
+                  :key="index"
+                  class="panel-stack"
+                >
+                  <textarea
+                    v-model="newTips[index]"
+                    class="form-control"
+                    :aria-label="`课程提示 ${index + 1}`"
+                    rows="2"
+                    placeholder="输入提示内容"
+                    required
+                  />
+                  <button
+                    class="button"
+                    type="button"
+                    @click="newTips.splice(index, 1)"
+                  >
+                    删除这条提示
+                  </button>
+                </div>
+                <button
+                  class="button"
+                  type="button"
+                  @click="newTips.push('')"
+                >
+                  添加提示
+                </button>
+              </details>
             </fieldset>
             <p
               v-if="eventError"
@@ -472,6 +599,7 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
 .edit-event__heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
 .edit-event__heading h2, .edit-event__heading h3 { margin: 0; }
 .edit-event__heading-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.edit-event__delete { color: #dc3545; }
 .edit-event > .edit-event__background { height: auto; overflow: clip; border-radius: 12px; }
 .edit-event--fancy .edit-event__layout { padding: 16px; }
 .edit-event--fancy .edit-event__schedules { padding: 16px; border-radius: 12px; background: color-mix(in srgb, var(--background-secondary) 94%, transparent); }

@@ -11,7 +11,7 @@ defineProps<{ disabled?: boolean }>()
       :disabled="disabled"
     >
       <option value="auto">
-        自动（8～26 色）
+        自动（16～30 色）
       </option>
       <option
         v-for="count in 19"

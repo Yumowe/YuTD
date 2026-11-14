@@ -4,7 +4,12 @@ import com.yutd.app.local.LocalDatabase
 import com.yutd.app.local.preferences.toJS
 import com.yutd.app.local.style.toJS
 import com.yutd.app.local.utils.LocalApiException
+import com.yutd.app.local.utils.obj
 import android.webkit.CookieManager
+import android.content.ComponentName
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
 import com.getcapacitor.Plugin
@@ -29,12 +34,44 @@ class YuTDPlugin : Plugin() {
         val result = JSObject()
         result.put("bridgeVersion", 1)
         result.put("features", JSArray(listOf("preferences", "styles", "dataVersion", "phases", "events", "schedules",
-            "tasks", "tips", "resources", "images", "config", "auth")))
+            "tasks", "tips", "resources", "images", "config", "auth", "reminders")))
         call.resolve(result)
     }
 
     @PluginMethod
     fun getPreferences(call: PluginCall) = execute(call, database.preferences) { get().toJS() }
+
+    @PluginMethod
+    fun openAutoStartSettings(call: PluginCall) {
+        activity.runOnUiThread {
+            val intents = listOf(
+                "autostart" to Intent().setComponent(ComponentName(
+                    "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity"
+                )).putExtra("package_name", context.packageName).putExtra("packageName", context.packageName),
+                "application" to Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+            )
+            for ((index, target) in intents.withIndex()) {
+                try {
+                    activity.startActivity(target.second)
+                    call.resolve(JSObject().put("target", target.first))
+                    return@runOnUiThread
+                } catch (error: Exception) {
+                    if (index == intents.lastIndex) call.reject("无法打开系统应用设置，请在手机设置中手动允许 YuTD 后台自启动", "SETTINGS_UNAVAILABLE", error)
+                }
+            }
+        }
+    }
+
+    @PluginMethod
+    fun getReminderData(call: PluginCall) = execute(call, database.preferences) {
+        database.read {
+            obj("preferences" to get().toJS(),
+                "phases" to database.phases.list().getJSONArray("items"),
+                "events" to database.events.list(JSONObject()).getJSONArray("items"),
+                "tasks" to database.tasks.list(JSONObject()).getJSONArray("items"),
+                "tips" to database.tips.list(JSONObject()).getJSONArray("items"))
+        }
+    }
 
     @PluginMethod
     fun updatePreferences(call: PluginCall) = execute(call, database.preferences) {
@@ -82,6 +119,7 @@ class YuTDPlugin : Plugin() {
     @PluginMethod fun listTasks(call: PluginCall) = execute(call, database.tasks) { list(query(call)) }
     @PluginMethod fun createTask(call: PluginCall) = execute(call, database.tasks) { save(null, body(call)) }
     @PluginMethod fun updateTask(call: PluginCall) = execute(call, database.tasks) { save(id(call), body(call)) }
+    @PluginMethod fun deleteTask(call: PluginCall) = execute(call, database.tasks) { delete(id(call)) }
     @PluginMethod fun postponeTask(call: PluginCall) = execute(call, database.tasks) { postpone(id(call), body(call)) }
     @PluginMethod fun dailyTasks(call: PluginCall) = execute(call, database.tasks) { attention(query(call), false) }
     @PluginMethod fun weeklyTasks(call: PluginCall) = execute(call, database.tasks) { attention(query(call), true) }

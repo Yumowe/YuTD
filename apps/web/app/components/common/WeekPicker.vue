@@ -1,9 +1,22 @@
 <script setup lang="ts">
+interface WeekGroup {
+  key: string
+  label: string
+  weeks: number[]
+  selected: boolean
+  merged: boolean
+}
+
 const props = withDefaults(defineProps<{
+  /** 可显示的总周数。 */
   count?: number
+  /** 已选择的周数。 */
   modelValue?: number[]
+  /** 是否允许选择和拖动涂选。 */
   selectable?: boolean
+  /** 是否仅允许单选。 */
   exclusive?: boolean
+  /** 选中项颜色。 */
   color?: string | null
 }>(), {
   count: 0,
@@ -16,97 +29,9 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [weeks: number[]]
 }>()
-const picker = ref<HTMLDivElement | null>(null)
-let painting: { pointerId: number, visited: Set<number>, selected: Set<number>, x: number, y: number } | null = null
-let ignoreClick = false
-
-function stopPainting(event?: PointerEvent) {
-  if (!painting || (event && event.pointerId !== painting.pointerId)) return
-  painting = null
-  document.removeEventListener('pointermove', movePainting)
-  document.removeEventListener('pointerup', stopPainting)
-  document.removeEventListener('pointercancel', stopPainting)
-  window.removeEventListener('blur', cancelPainting)
-}
-
-function cancelPainting() {
-  stopPainting()
-}
-
-function paint(weeks: number[]) {
-  if (!painting) return
-  for (const week of weeks) {
-    if (props.exclusive) {
-      painting.selected = new Set([week])
-      continue
-    }
-    if (painting.visited.has(week)) continue
-    painting.visited.add(week)
-    if (painting.selected.has(week)) painting.selected.delete(week)
-    else painting.selected.add(week)
-  }
-  emit('update:modelValue', [...painting.selected].sort((a, b) => a - b))
-}
-
-function startPainting(weeks: number[], event: PointerEvent) {
-  if (!props.selectable || !event.isPrimary || event.button !== 0 || painting) return
-  event.preventDefault()
-  stopPainting()
-  ignoreClick = true
-  painting = { pointerId: event.pointerId, visited: new Set(), selected: new Set(props.modelValue), x: event.clientX, y: event.clientY }
-  document.addEventListener('pointermove', movePainting)
-  document.addEventListener('pointerup', stopPainting)
-  document.addEventListener('pointercancel', stopPainting)
-  window.addEventListener('blur', cancelPainting)
-  paint(weeks)
-}
-
-function movePainting(event: PointerEvent) {
-  if (!painting || painting.pointerId !== event.pointerId) return
-  if (!(event.buttons & 1)) {
-    stopPainting()
-    return
-  }
-  const { x, y } = painting
-  const dx = event.clientX - x
-  const dy = event.clientY - y
-  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 8))
-  painting.x = event.clientX
-  painting.y = event.clientY
-
-  // 补采两次事件之间的路径，快速划过也不会漏掉中间的周。
-  for (let step = 1; step <= steps; step++) {
-    const item = document.elementFromPoint(x + dx * step / steps, y + dy * step / steps)
-      ?.closest<HTMLButtonElement>('[data-week]')
-    if (!item || !picker.value?.contains(item)) continue
-    const week = Number(item.dataset.week)
-    if (props.exclusive ? painting.selected.has(week) : painting.visited.has(week)) continue
-    paint([week])
-  }
-}
-
-function clickWeek(weeks: number[], event?: MouseEvent) {
-  if (ignoreClick && event && event.detail !== 0) {
-    ignoreClick = false
-    return
-  }
-  ignoreClick = false
-  toggle(weeks)
-}
-
-watch([() => props.selectable, () => props.count, () => props.exclusive], cancelPainting)
-onBeforeUnmount(cancelPainting)
 
 // 最小合并周长度（包含）
 const minMergeLength = 3
-
-interface WeekGroup {
-  key: string
-  label: string
-  weeks: number[]
-  selected: boolean
-  merged: boolean
-}
 
 // 相邻 minMergeLength 以上、奇数或偶数 minMergeLength 以上进行合并
 function mergeWeeks(weeks: number[]) {
@@ -193,6 +118,90 @@ const groups = computed<WeekGroup[]>(() => {
 
 function groupTitle(weeks: number[]) {
   return `第${weeks.join('、')}周`
+}
+
+const picker = ref<HTMLDivElement | null>(null)
+
+let painting: { pointerId: number, visited: Set<number>, selected: Set<number>, x: number, y: number } | null = null
+
+let ignoreClick = false
+
+watch([() => props.selectable, () => props.count, () => props.exclusive], cancelPainting)
+
+onBeforeUnmount(cancelPainting)
+
+function stopPainting(event?: PointerEvent) {
+  if (!painting || (event && event.pointerId !== painting.pointerId)) return
+  painting = null
+  document.removeEventListener('pointermove', movePainting)
+  document.removeEventListener('pointerup', stopPainting)
+  document.removeEventListener('pointercancel', stopPainting)
+  window.removeEventListener('blur', cancelPainting)
+}
+
+function cancelPainting() {
+  stopPainting()
+}
+
+function paint(weeks: number[]) {
+  if (!painting) return
+  for (const week of weeks) {
+    if (props.exclusive) {
+      painting.selected = new Set([week])
+      continue
+    }
+    if (painting.visited.has(week)) continue
+    painting.visited.add(week)
+    if (painting.selected.has(week)) painting.selected.delete(week)
+    else painting.selected.add(week)
+  }
+  emit('update:modelValue', [...painting.selected].sort((a, b) => a - b))
+}
+
+function startPainting(weeks: number[], event: PointerEvent) {
+  if (!props.selectable || !event.isPrimary || event.button !== 0 || painting) return
+  event.preventDefault()
+  stopPainting()
+  ignoreClick = true
+  painting = { pointerId: event.pointerId, visited: new Set(), selected: new Set(props.modelValue), x: event.clientX, y: event.clientY }
+  document.addEventListener('pointermove', movePainting)
+  document.addEventListener('pointerup', stopPainting)
+  document.addEventListener('pointercancel', stopPainting)
+  window.addEventListener('blur', cancelPainting)
+  paint(weeks)
+}
+
+function movePainting(event: PointerEvent) {
+  if (!painting || painting.pointerId !== event.pointerId) return
+  if (!(event.buttons & 1)) {
+    stopPainting()
+    return
+  }
+  const { x, y } = painting
+  const dx = event.clientX - x
+  const dy = event.clientY - y
+  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dy) / 8))
+  painting.x = event.clientX
+  painting.y = event.clientY
+
+  // 补采两次事件之间的路径，快速划过也不会漏掉中间的周。
+  for (let step = 1; step <= steps; step++) {
+    const item = document.elementFromPoint(x + dx * step / steps, y + dy * step / steps)
+      ?.closest<HTMLButtonElement>('[data-week]')
+    if (!item || !picker.value?.contains(item)) continue
+    const week = Number(item.dataset.week)
+    if (props.exclusive ? painting.selected.has(week) : painting.visited.has(week)) continue
+    paint([week])
+  }
+}
+
+function clickWeek(weeks: number[], event?: MouseEvent) {
+  if (ignoreClick && event && event.detail !== 0) {
+    ignoreClick = false
+    return
+  }
+  ignoreClick = false
+  toggle(weeks)
 }
 
 function toggle(weeks: number[]) {

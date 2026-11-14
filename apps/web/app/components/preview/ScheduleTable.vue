@@ -1,32 +1,60 @@
 <script setup lang="ts">
-import { requestApiData } from '~/utils/api'
+// 组件与依赖
 import EventBlock from '~/components/preview/Event/EventBlock.vue'
-import { gsap } from 'gsap'
 import Background from '../image/BackgroundLayout.vue'
 import BackgroundSelect from '../image/BackgroundSelect.vue'
+import TaskLine from '~/components/preview/Task/TaskLine.vue'
+import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import type { BackgroundSelection } from '~/components/image/BackgroundSelect.vue'
+import { gsap } from 'gsap'
 import { weekdays as weekdayLabels } from '~/utils/date'
 
 const EventEditPopup = defineAsyncComponent(() => import('../edit/EventEditPopup.vue'))
-const editingEventId = ref<number | null>(null)
-const creatingEvent = ref(false)
-const { mode: systemMode } = useSystemStatus()
-function closeEventEditor(open: boolean) {
-  if (open) return
-  editingEventId.value = null
-  creatingEvent.value = false
+
+// 类型与组件参数
+interface TaskLineState {
+  key: string
+  task: ApiData<Api['api']['task']['get']>[number]
+  kind: 'plan' | 'due'
+  minutes: number
+  insideEvent: boolean
+  top: Ref<number>
+  covered: Ref<boolean>
+  markerOffset: Ref<number>
 }
 
 const props = withDefaults(defineProps<{
-  phaseId: number
+  /** 当前阶段的课程及排课数据，未就绪时为 undefined。 */
+  events: ApiData<Api['api']['event']['get']> | undefined
+  /** 当前阶段的任务，用于显示计划时间线和截止时间线。 */
+  tasks: ApiData<Api['api']['task']['get']> | undefined
+  /** 课程数据是否正在读取，数据就绪后才进行首次定位。 */
+  eventsPending: boolean
+  /** 重新读取课程数据，交给课程编辑弹窗调用。 */
+  refreshEvents: () => Promise<unknown>
+  /** 编辑课程或任务后统一重新读取页面数据。 */
+  refreshContent: () => Promise<unknown>
+  /** 写入任务完成、取消或延期等变更。 */
+  changeTask?: ChangeTask
+  /** 当前阶段，提供起始日期、阶段 ID 和总周数。 */
+  phase: ApiData<Api['api']['phase']['get']>[number]
+  /** 显示日期的方式：easy 仅显示有内容的周几，full 显示整周，custom 按 weekdays 显示；默认 full。 */
   mode?: 'easy' | 'full' | 'custom'
+  /** custom 模式显示的周几，1～7 对应周一至周日，按传入顺序排列。 */
   weekdays?: number[]
+  /** 是否显示上一周期和下一周期按钮，默认 true。 */
   showPeriodNavigation?: boolean
+  /** 背景绑定的标识前缀，实际保存时追加阶段 ID，默认 schedule。 */
   backgroundKey?: string
+  /** 进入或返回组件时，是否居中到当前时间；超出时间范围时回到顶部，默认 false。 */
   autoCenter?: boolean
+  /** 聚焦时额外增加的纵向倍率，默认 2，即最大为原高度的 3 倍。 */
   maxFocusScale?: number
+  /** 聚焦列的横向倍率，默认 3，不超过当前列数；custom 模式仅有 1～2 列时不放大。 */
   focusColumnScale?: number
+  /** 未聚焦时每小时的像素高度，默认 72。 */
   hourPixels?: number
+  /** 时间表上下边缘的留白像素，默认 20。 */
   edgePixels?: number
 }>(), {
   showPeriodNavigation: true,
@@ -38,56 +66,35 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
+  /** 鼠标移入课程时传出课程 ID，移出时传出 null。 */
   'event-hover': [eventId: number | null]
+  /** 鼠标移入任务时间线时传出任务 ID，移出时传出 null。 */
   'task-hover': [taskId: number | null]
 }>()
 
-// 数据获取
-const eventsClient = useApi({
-  key: `schedule:events:${props.phaseId}`,
-  read: async (api) => {
-    return requestApiData(
-      api.api.event.get({ query: { phaseId: props.phaseId } }),
-      '获取事件失败'
-    )
-  }
-})
-const tasksClient = useApi({
-  key: `schedule:tasks:${props.phaseId}`,
-  read: async (api) => {
-    return requestApiData(
-      api.api.task.get({ query: { phaseId: props.phaseId } }),
-      '获取任务失败'
-    )
-  }
-})
-const phaseClient = useApi({
-  key: `schedule:phase:${props.phaseId}`,
-  read: async (api) => {
-    return requestApiData(
-      api.api.phase({ id: props.phaseId }).get(),
-      '获取阶段失败'
-    )
-  }
-})
-const [initialEvents, initialTasks, phase] = await Promise.all([
-  eventsClient.read(),
-  tasksClient.read(),
-  phaseClient.read()
-])
-const events = ref(initialEvents)
-const tasks = ref(initialTasks)
+// ==================== 数据处理 ====================
+
+// 数据来源与时间换算
+const events = computed(() => props.events ?? [])
+
+const tasks = computed(() => props.tasks ?? [])
+
 const { now, timeZone } = useSystemTime()
 
-// 计算日程表的开始时间和结束时间
+const maxWeek = computed(() => props.phase.weekCount)
+
+const phaseDay = computed(() => calendarDate(props.phase.startDate, 'UTC'))
+
 function timeToMinutes(time: string) {
   const [hours, minutes] = time.split(':').map(Number) as [number, number]
   return hours * 60 + minutes
 }
+
 function dateToMinutes(date: Date) {
   const { hour, minute } = clockParts(date, timeZone.value)
   return hour * 60 + minute
 }
+
 function minutesToTime(minutes: number) {
   const hours = Math.floor(minutes / 60)
   const mins = minutes % 60
@@ -95,43 +102,20 @@ function minutesToTime(minutes: number) {
     .toString()
     .padStart(2, '0')}`
 }
+
 function dateToWeekday(date: Date) {
   return calendarWeekday(calendarDate(date, timeZone.value))
 }
-const scheduleBounds = computed(() => {
-  const startMinutes: number[] = []
-  const endMinutes: number[] = []
-  for (const schedule of events.value.flatMap(event => event.schedules)) {
-    if (schedule.startTime && schedule.endTime) {
-      startMinutes.push(timeToMinutes(schedule.startTime))
-      endMinutes.push(timeToMinutes(schedule.endTime))
-    }
-  }
-  for (const task of tasks.value) {
-    if (task.dueDate) endMinutes.push(dateToMinutes(task.dueDate))
-    if (task.plannedDate) startMinutes.push(dateToMinutes(task.plannedDate))
-  }
-  return {
-    start: startMinutes.length ? Math.min(...startMinutes) : 8 * 60,
-    end: endMinutes.length ? Math.max(...endMinutes) : 22 * 60
-  }
-})
-// 今日时间超出课程范围时也保留对应的时间轴，不把标记挤到边界。
-const scheduleStartMinutes = computed(() => Math.floor(Math.min(
-  scheduleBounds.value.start,
-  hasTodayColumn.value ? currentPosition.value!.minutes : scheduleBounds.value.start
-) / 60) * 60)
-const scheduleEndMinutes = computed(() => Math.ceil(Math.max(
-  scheduleBounds.value.end,
-  hasTodayColumn.value ? currentPosition.value!.minutes : scheduleBounds.value.end
-) / 60) * 60)
-const maxWeek = phase.weekCount
-const phaseDay = calendarDate(phase.startDate, 'UTC')
-const week = ref(1)
-const dayOffset = ref(0)
+
 function weekOf(date: string) {
-  return Math.floor((calendarDayNumber(date) - calendarDayNumber(phaseDay)) / 7) + 1
+  return Math.floor((calendarDayNumber(date) - calendarDayNumber(phaseDay.value)) / 7) + 1
 }
+
+// 显示日期与周期范围
+const week = ref(1)
+
+const dayOffset = ref(0)
+
 const visibleWeekdays = computed(() => {
   const mode = props.mode ?? 'full'
 
@@ -166,7 +150,7 @@ const visibleWeekdays = computed(() => {
       }
 
       // 只要这个课程在 phase 的任意一周出现，就保留这个周几
-      if (schedule.weeks.some(week => week != null && Number(week) >= 1 && Number(week) <= maxWeek)) {
+      if (schedule.weeks.some(week => week != null && Number(week) >= 1 && Number(week) <= maxWeek.value)) {
         hasClass.add(weekday)
       }
     }
@@ -182,28 +166,165 @@ const visibleWeekdays = computed(() => {
 
   return weekdayLabels.map((_, index) => index + 1).filter(day => hasClass.has(day))
 })
+
 const visibleColumns = computed(() => {
   let nextWeekOffset = 0
   return visibleWeekdays.value.map((day, index, days) => {
     if (index > 0 && day < days[index - 1]!) nextWeekOffset += 7
-    const date = addCalendarDays(phaseDay, (week.value - 1) * 7 + day - 1 + nextWeekOffset + dayOffset.value)
+    const date = addCalendarDays(phaseDay.value, (week.value - 1) * 7 + day - 1 + nextWeekOffset + dayOffset.value)
     return { key: date, date, weekday: calendarWeekday(date), week: weekOf(date) }
   })
 })
-const weekLabel = computed(() => [...new Set(visibleColumns.value.map(column => column.week))]
-  .filter(week => week >= 1 && week <= maxWeek)
-  .join(' / ') || '—')
-const canMovePrevious = computed(() => props.mode === 'custom' || week.value > 1)
-const canMoveNext = computed(() => props.mode === 'custom' || week.value < maxWeek)
 
-function movePeriod(direction: -1 | 1) {
-  if (direction < 0 ? !canMovePrevious.value : !canMoveNext.value) return
-  if (props.mode === 'custom') {
-    dayOffset.value += direction * visibleColumns.value.length
-  } else {
-    week.value += direction
+const weekLabel = computed(() => [...new Set(visibleColumns.value.map(column => column.week))]
+  .filter(week => week >= 1 && week <= maxWeek.value)
+  .join(' / ') || '—')
+
+const canMovePrevious = computed(() => props.mode === 'custom' || week.value > 1)
+
+const canMoveNext = computed(() => props.mode === 'custom' || week.value < maxWeek.value)
+
+// 当前日期与时间范围
+function getSchedulePosition(date: Date) {
+  const weekNumber = weekOf(calendarDate(date, timeZone.value))
+
+  return {
+    week: weekNumber,
+    weekday: dateToWeekday(date),
+    minutes: dateToMinutes(date) + clockParts(date, timeZone.value).second / 60,
+    inPhase: weekNumber >= 1 && weekNumber <= maxWeek.value
   }
 }
+
+const currentPosition = computed(() => {
+  return now.value
+    ? getSchedulePosition(now.value)
+    : null
+})
+
+const today = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
+
+const hasTodayColumn = computed(() => today.value !== null
+  && visibleColumns.value.some(column => column.date === today.value))
+
+const scheduleBounds = computed(() => {
+  const minutes: number[] = []
+  for (const schedule of events.value.flatMap(event => event.schedules)) {
+    if (schedule.startTime && schedule.endTime) {
+      minutes.push(timeToMinutes(schedule.startTime), timeToMinutes(schedule.endTime))
+    }
+  }
+  for (const task of tasks.value) {
+    if (task.plannedDate) minutes.push(dateToMinutes(task.plannedDate))
+    if (task.dueDate) minutes.push(dateToMinutes(task.dueDate))
+  }
+  return {
+    start: minutes.length ? Math.min(...minutes) : 8 * 60,
+    end: minutes.length ? Math.max(...minutes) : 22 * 60
+  }
+})
+
+const scheduleStartMinutes = computed(() => Math.floor(scheduleBounds.value.start / 60) * 60)
+
+const scheduleEndMinutes = computed(() => Math.ceil(scheduleBounds.value.end / 60) * 60)
+
+// 课程数据筛选
+const eventEntries = computed(() =>
+  visibleColumns.value.flatMap(column => events.value.flatMap(event =>
+    event.schedules.flatMap((schedule) => {
+      if (schedule.weekday !== column.weekday || column.week < 1 || column.week > maxWeek.value) return []
+      const currentWeek = column.week
+      if (Array.isArray(schedule.weeks)) {
+        if (!schedule.weeks.includes(currentWeek)) {
+          return []
+        }
+      }
+      return {
+        key: `${column.key}-${event.id}-${schedule.id}`,
+        columnKey: column.key,
+        weekday: schedule.weekday,
+        color: event.color,
+        eventId: event.id,
+        eventName: event.name,
+        startTime: schedule.startTime,
+        endTime: schedule.endTime,
+        location: schedule.location || event.location,
+        organizer: schedule.organizer || event.organizer || null,
+        tips: event.tips
+      }
+    })
+  ))
+)
+
+// 任务日期分组与课程覆盖关系
+const taskLineEntries = computed(() => {
+  const columnsByDate = new Map(visibleColumns.value.map(column => [column.date, column]))
+  const groups = new Map<string, Omit<TaskLineState, 'top' | 'covered' | 'markerOffset'>[]>()
+  const eventRanges = new Map<string, { start: number, end: number }[]>()
+  for (const column of visibleColumns.value) {
+    groups.set(column.key, [])
+    eventRanges.set(column.key, events.value.flatMap(event => event.schedules.flatMap((schedule) => {
+      if (column.week < 1 || column.week > maxWeek.value || schedule.weekday !== column.weekday
+        || (Array.isArray(schedule.weeks) && !schedule.weeks.includes(column.week))) return []
+      return { start: timeToMinutes(schedule.startTime), end: timeToMinutes(schedule.endTime) }
+    })))
+  }
+
+  for (const task of tasks.value) {
+    for (const kind of ['plan', 'due'] as const) {
+      const date = kind === 'plan' ? task.plannedDate : task.dueDate
+      if (!date) continue
+      const column = columnsByDate.get(calendarDate(date, timeZone.value))
+      if (!column) continue
+      const minutes = dateToMinutes(date)
+      const insideEvent = eventRanges.get(column.key)!.some(range => minutes >= range.start && minutes <= range.end)
+      groups.get(column.key)!.push({
+        key: `${task.id}-${kind}`,
+        task,
+        kind,
+        minutes,
+        insideEvent
+      })
+    }
+  }
+  for (const lines of groups.values()) {
+    lines.sort((a, b) => b.minutes - a.minutes || a.key.localeCompare(b.key))
+  }
+  return groups
+})
+
+// 跟随当前阶段、时区和显示方式确定初始周期
+watch(
+  [() => currentPosition.value?.week, () => props.mode, () => props.weekdays?.join(','), timeZone],
+  ([currentWeek]) => {
+    if (currentWeek === undefined) return
+
+    week.value = props.mode === 'custom' ? currentWeek : Math.min(maxWeek.value, Math.max(1, currentWeek))
+    dayOffset.value = 0
+  },
+  { immediate: true }
+)
+
+// ==================== 界面参数 ====================
+
+// 容器、时间轴与表格尺寸
+const viewport = ref<HTMLElement | null>(null)
+
+const scheduleHeader = ref<HTMLElement | null>(null)
+
+const scheduleBody = ref<HTMLElement | null>(null)
+
+const hourPixels = computed(() => props.hourPixels)
+
+const edgePixels = computed(() => props.edgePixels)
+
+const boardHeight = computed(() => {
+  const duration = scheduleEndMinutes.value - scheduleStartMinutes.value
+
+  return duration * (hourPixels.value / 60)
+    + edgePixels.value * 2
+})
+
 const hourMarks = computed(() => Array.from(
   {
     length:
@@ -212,38 +333,36 @@ const hourMarks = computed(() => Array.from(
   (_, index: number) => scheduleStartMinutes.value + index * 60
 ))
 
-// 焦点缩放
+// 聚焦缩放与列宽
 const maxFocusScale = computed(() => props.maxFocusScale)
+
+const focusColumnScale = computed(() => props.mode === 'custom' && props.weekdays?.length && props.weekdays.length <= 2
+  ? 1
+  : Math.min(props.focusColumnScale, Math.max(1, visibleColumns.value.length)))
 
 const animatedFocusScale = reactive({
   value: props.maxFocusScale
 })
 
-watch(maxFocusScale, (value) => {
-  gsap.to(animatedFocusScale, {
-    value,
-    duration: 0.45,
-    ease: 'power4.out',
-    overwrite: true
-  })
-}) // 垂直放大倍数
-const focusColumnScale = computed(() => props.mode === 'custom' && props.weekdays?.length && props.weekdays.length <= 2
-  ? 1
-  : Math.min(props.focusColumnScale, Math.max(1, visibleColumns.value.length))) // 水平放大倍数
 const focus = reactive({
   progress: 0,
   offsetY: 0
 })
+
 const columnWidths = ref(
   visibleColumns.value.map(() => ({ weight: 1 }))
 )
-watch(
-  visibleColumns,
-  (days) => {
-    resetFocus()
-    columnWidths.value = days.map(() => ({ weight: 1 }))
-  }
-)
+
+const selectedBlockKey = ref<string | null>(null)
+
+const focusMoving = ref(false)
+
+let removeFocusClickListener: (() => void) | undefined
+
+let focusTween: ReturnType<typeof gsap.to> | undefined
+
+let columnTween: ReturnType<typeof gsap.to> | undefined
+
 const gridColumns = computed(() => {
   const columns = columnWidths.value.map((column) => {
     return `minmax(0, ${column.weight}fr)`
@@ -251,25 +370,11 @@ const gridColumns = computed(() => {
 
   return `var(--time-axis-width) ${columns.join(' ')}`
 })
+
 const displayHourPixels = computed(() => {
   return hourPixels.value
     * (1 + animatedFocusScale.value * focus.progress)
 })
-const selectedBlockKey = ref<string | null>(null)
-const focusMoving = ref(false)
-let removeFocusClickListener: (() => void) | undefined
-
-function FocusClickListener(event: MouseEvent) {
-  const target = event.target
-
-  if (target instanceof Element && target.closest('.event-block, .edit-popup, .event-edit-popup, .schedule-edit-trigger'))
-    return
-
-  closeFocus()
-}
-
-let focusTween: ReturnType<typeof gsap.to> | undefined
-let columnTween: ReturnType<typeof gsap.to> | undefined
 
 function animateColumns(columnKey: string | null) {
   columnTween?.kill()
@@ -297,6 +402,235 @@ function animateColumns(columnKey: string | null) {
     duration: 0.45,
     ease: 'power3.out'
   })
+}
+
+function resetFocus() {
+  focusTween?.kill()
+  columnTween?.kill()
+  removeFocusClickListener?.()
+  removeFocusClickListener = undefined
+  selectedBlockKey.value = null
+  focusMoving.value = false
+  focus.progress = 0
+  focus.offsetY = 0
+  columnWidths.value.forEach((column) => {
+    column.weight = 1
+  })
+}
+
+watch(maxFocusScale, (value) => {
+  gsap.to(animatedFocusScale, {
+    value,
+    duration: 0.45,
+    ease: 'power4.out',
+    overwrite: true
+  })
+})
+
+watch(
+  visibleColumns,
+  (days) => {
+    resetFocus()
+    columnWidths.value = days.map(() => ({ weight: 1 }))
+  }
+)
+
+watch(
+  [maxFocusScale, focusColumnScale, hourPixels, edgePixels],
+  () => {
+    if (selectedBlockKey.value) openFocus(selectedBlockKey.value)
+  },
+  { flush: 'post' }
+)
+
+// 课程与任务的像素定位
+function minutesToY(minutes: number) {
+  return (minutes - scheduleStartMinutes.value)
+    * (displayHourPixels.value / 60)
+    + edgePixels.value
+    + focus.offsetY
+}
+
+const eventBlocks = computed(() => eventEntries.value.map(block => ({
+  ...block,
+  top: minutesToY(timeToMinutes(block.startTime)),
+  height: (timeToMinutes(block.endTime) - timeToMinutes(block.startTime)) * (displayHourPixels.value / 60)
+})))
+
+const taskLines = shallowRef(new Map<string, TaskLineState[]>())
+
+function rebuildTaskLines() {
+  taskLines.value = new Map<string, TaskLineState[]>([...taskLineEntries.value].map(([key, lines]) => [
+    key,
+    lines.map(line => ({
+      ...line,
+      top: ref(minutesToY(line.minutes)),
+      covered: ref(line.insideEvent),
+      markerOffset: ref(0)
+    }))
+  ]))
+  updateTaskLineCrowding()
+}
+
+function updateTaskLinePositions() {
+  const scale = displayHourPixels.value / 60
+  const origin = edgePixels.value + focus.offsetY - scheduleStartMinutes.value * scale
+  for (const lines of taskLines.value.values()) {
+    for (const line of lines) line.top.value = origin + line.minutes * scale
+  }
+  updateTaskLineCrowding()
+}
+
+function updateTaskLineCrowding() {
+  for (const lines of taskLines.value.values()) {
+    const current = displayHourPixels.value > 0
+      ? lines
+      : [...lines].sort((a, b) => b.top.value - a.top.value || a.key.localeCompare(b.key))
+    let markerTop = Infinity
+    let markerSlot = 0
+    for (const [index, line] of current.entries()) {
+      const previous = current[index - 1]
+      const next = current[index + 1]
+      const top = line.top.value
+      const crowded = (previous !== undefined && Math.abs(previous.top.value - top) < 40)
+        || (next !== undefined && Math.abs(next.top.value - top) < 40)
+      const covered = line.insideEvent || crowded
+      if (line.covered.value !== covered) line.covered.value = covered
+      if (covered) {
+        markerSlot = markerTop - top < 18 ? markerSlot + 1 : 0
+        markerTop = top
+      }
+      const offset = covered ? markerSlot * 18 : 0
+      if (line.markerOffset.value !== offset) line.markerOffset.value = offset
+    }
+  }
+}
+
+const currentTimeY = computed(() => {
+  const minutes = currentPosition.value?.minutes
+  return minutes === undefined || minutes < scheduleStartMinutes.value || minutes > scheduleEndMinutes.value
+    ? null
+    : minutesToY(minutes)
+})
+
+watch([tasks, events, visibleColumns, timeZone], rebuildTaskLines, { immediate: true, deep: true })
+
+watch([displayHourPixels, scheduleStartMinutes, edgePixels, () => focus.offsetY], updateTaskLinePositions)
+
+// 首次进入与缓存返回时的视窗定位
+const initialPosition = reactive({ pending: true })
+
+function centerCurrentTime() {
+  if (!props.autoCenter || !hasTodayColumn.value || currentPosition.value === null
+    || !viewport.value || !scheduleBody.value) return
+
+  // 首页滚动的是 PageCard；独立课程表则可能由整个页面滚动。
+  let container = viewport.value.parentElement
+  while (container && !/(auto|scroll|overlay)/.test(getComputedStyle(container).overflowY)) {
+    container = container.parentElement
+  }
+  const scroller = container ?? document.scrollingElement
+  if (!scroller) return
+
+  if (currentTimeY.value === null) {
+    scroller.scrollTop = 0
+    initialPosition.pending = false
+    return
+  }
+
+  const isDocument = scroller === document.scrollingElement
+  const viewportTop = isDocument ? 0 : scroller.getBoundingClientRect().top + scroller.clientTop
+  const viewportHeight = isDocument ? window.innerHeight : scroller.clientHeight
+  if (!viewportHeight || !scheduleBody.value.clientHeight) return
+  const headerHeight = scheduleHeader.value?.offsetHeight ?? 0
+  const top = scroller.scrollTop + scheduleBody.value.getBoundingClientRect().top
+    - viewportTop + currentTimeY.value - (viewportHeight + headerHeight) / 2
+  scroller.scrollTop = Math.max(0, Math.min(top, scroller.scrollHeight - viewportHeight))
+  initialPosition.pending = false
+}
+
+function positionInitially() {
+  if (initialPosition.pending && !props.eventsPending && props.events !== undefined && props.tasks !== undefined) centerCurrentTime()
+}
+
+watch(
+  [() => props.autoCenter, today, timeZone, visibleColumns, viewport, scheduleBody],
+  () => {
+    initialPosition.pending = true
+    void nextTick(positionInitially)
+  },
+  { flush: 'post' }
+)
+
+watch([events, tasks, boardHeight, () => props.eventsPending], () => {
+  void nextTick(positionInitially)
+}, { flush: 'post' })
+
+// 背景选择与裁剪尺寸
+const backgroundSelection = shallowRef<BackgroundSelection | null>(null)
+
+const backgroundPending = ref(true)
+
+const background = ref<InstanceType<typeof Background> | null>(null)
+
+const backgroundRatio = ref<number>()
+
+let backgroundObserver: ResizeObserver | undefined
+
+watch(background, (component) => {
+  backgroundObserver?.disconnect()
+  const element = component?.$el as HTMLElement | undefined
+  if (!element) return
+  const resize = () => {
+    if (element.clientWidth && element.clientHeight) backgroundRatio.value = element.clientWidth / element.clientHeight
+  }
+  resize()
+  backgroundObserver = new ResizeObserver(resize)
+  backgroundObserver.observe(element)
+}, { flush: 'post' })
+
+// 课程编辑弹窗状态
+const { mode: systemMode } = useSystemStatus()
+
+const editingEventId = ref<number | null>(null)
+
+const creatingEvent = ref(false)
+
+// ==================== 生命周期 ====================
+
+onActivated(() => {
+  initialPosition.pending = true
+  void nextTick(positionInitially)
+})
+
+onBeforeUnmount(() => {
+  removeFocusClickListener?.()
+  removeFocusClickListener = undefined
+  focusTween?.kill()
+  columnTween?.kill()
+  backgroundObserver?.disconnect()
+})
+
+// ==================== 点击与交互操作 ====================
+
+// 切换显示周期
+function movePeriod(direction: -1 | 1) {
+  if (direction < 0 ? !canMovePrevious.value : !canMoveNext.value) return
+  if (props.mode === 'custom') {
+    dayOffset.value += direction * visibleColumns.value.length
+  } else {
+    week.value += direction
+  }
+}
+
+// 聚焦、取消聚焦与外部点击
+function FocusClickListener(event: MouseEvent) {
+  const target = event.target
+
+  if (target instanceof Element && target.closest('.event-block, .edit-popup, .event-edit-popup, .schedule-edit-trigger'))
+    return
+
+  closeFocus()
 }
 
 function openFocus(key: string) {
@@ -380,267 +714,19 @@ function closeFocus() {
   })
 }
 
-async function refreshEvents() {
-  try {
-    const updated = await eventsClient.read()
-    resetFocus()
-    events.value = updated
-  } catch {
-    // useApi 已统一上报，保留现有课程表供重试。
-  }
-}
-async function refreshTasks() {
-  try {
-    tasks.value = await tasksClient.read()
-  } catch {
-    // useApi 已统一上报。
-  }
+// 关闭编辑弹窗与保存后读取数据
+function closeEventEditor(open: boolean) {
+  if (open) return
+  editingEventId.value = null
+  creatingEvent.value = false
 }
 
-function resetFocus() {
-  focusTween?.kill()
-  columnTween?.kill()
-  removeFocusClickListener?.()
-  removeFocusClickListener = undefined
-  selectedBlockKey.value = null
-  focusMoving.value = false
-  focus.progress = 0
-  focus.offsetY = 0
-  columnWidths.value.forEach((column) => {
-    column.weight = 1
-  })
+async function contentSaved() {
+  resetFocus()
+  await props.refreshContent()
 }
 
-onBeforeUnmount(() => {
-  removeFocusClickListener?.()
-  removeFocusClickListener = undefined
-  focusTween?.kill()
-  columnTween?.kill()
-})
-
-// 呈现事件，任务组件
-function minutesToY(minutes: number) {
-  return (minutes - scheduleStartMinutes.value)
-    * (displayHourPixels.value / 60)
-    + edgePixels.value
-    + focus.offsetY
-}
-const hourPixels = computed(() => props.hourPixels)
-const edgePixels = computed(() => props.edgePixels)
-const boardHeight = computed(() => {
-  const duration = scheduleEndMinutes.value - scheduleStartMinutes.value
-
-  return duration * (hourPixels.value / 60)
-    + edgePixels.value * 2
-})
-watch(
-  [maxFocusScale, focusColumnScale, hourPixels, edgePixels],
-  () => {
-    if (selectedBlockKey.value) openFocus(selectedBlockKey.value)
-  },
-  { flush: 'post' }
-)
-const eventBlocks = computed(() =>
-  visibleColumns.value.flatMap(column => events.value.flatMap(event =>
-    event.schedules.flatMap((schedule) => {
-      if (schedule.weekday !== column.weekday || column.week < 1 || column.week > maxWeek) return []
-      const currentWeek = column.week
-      if (Array.isArray(schedule.weeks)) {
-        if (!schedule.weeks.includes(currentWeek)) {
-          return []
-        }
-      }
-      const start = timeToMinutes(schedule.startTime)
-      const end = timeToMinutes(schedule.endTime)
-
-      return {
-        key: `${column.key}-${event.id}-${schedule.id}`,
-        columnKey: column.key,
-        weekday: schedule.weekday,
-        color: event.color,
-        top: minutesToY(start),
-        height: (end - start) * (displayHourPixels.value / 60),
-        eventId: event.id,
-        eventName: event.name,
-        startTime: schedule.startTime,
-        endTime: schedule.endTime,
-        location: schedule.location || event.location,
-        organizer: schedule.organizer || event.organizer || null,
-        tips: event.tips
-      }
-    })
-  ))
-)
-
-interface TaskLineState {
-  key: string
-  task: (typeof initialTasks)[number]
-  kind: 'plan' | 'due'
-  minutes: number
-  insideEvent: boolean
-  top: Ref<number>
-  covered: Ref<boolean>
-  markerOffset: Ref<number>
-}
-
-const taskLines = shallowRef(new Map<string, TaskLineState[]>())
-
-function rebuildTaskLines() {
-  const columnsByDate = new Map(visibleColumns.value.map(column => [column.date, column]))
-  const groups = new Map<string, TaskLineState[]>()
-  const eventRanges = new Map<string, { start: number, end: number }[]>()
-  for (const column of visibleColumns.value) {
-    groups.set(column.key, [])
-    eventRanges.set(column.key, events.value.flatMap(event => event.schedules.flatMap((schedule) => {
-      if (column.week < 1 || column.week > maxWeek || schedule.weekday !== column.weekday
-        || (Array.isArray(schedule.weeks) && !schedule.weeks.includes(column.week))) return []
-      return { start: timeToMinutes(schedule.startTime), end: timeToMinutes(schedule.endTime) }
-    })))
-  }
-
-  for (const task of tasks.value) {
-    for (const kind of ['plan', 'due'] as const) {
-      const date = kind === 'plan' ? task.plannedDate : task.dueDate
-      if (!date) continue
-      const column = columnsByDate.get(calendarDate(date, timeZone.value))
-      if (!column) continue
-      const minutes = dateToMinutes(date)
-      const insideEvent = eventRanges.get(column.key)!.some(range => minutes >= range.start && minutes <= range.end)
-      groups.get(column.key)!.push({
-        key: `${task.id}-${kind}`,
-        task,
-        kind,
-        minutes,
-        insideEvent,
-        top: ref(minutesToY(minutes)),
-        covered: ref(insideEvent),
-        markerOffset: ref(0)
-      })
-    }
-  }
-  for (const lines of groups.values()) {
-    lines.sort((a, b) => b.minutes - a.minutes || a.key.localeCompare(b.key))
-  }
-  taskLines.value = groups
-  updateTaskLineCrowding()
-}
-
-function updateTaskLinePositions() {
-  const scale = displayHourPixels.value / 60
-  const origin = edgePixels.value + focus.offsetY - scheduleStartMinutes.value * scale
-  for (const lines of taskLines.value.values()) {
-    for (const line of lines) line.top.value = origin + line.minutes * scale
-  }
-  updateTaskLineCrowding()
-}
-
-function updateTaskLineCrowding() {
-  for (const lines of taskLines.value.values()) {
-    const current = displayHourPixels.value > 0
-      ? lines
-      : [...lines].sort((a, b) => b.top.value - a.top.value || a.key.localeCompare(b.key))
-    let markerTop = Infinity
-    let markerSlot = 0
-    for (const [index, line] of current.entries()) {
-      const previous = current[index - 1]
-      const next = current[index + 1]
-      const top = line.top.value
-      const crowded = (previous !== undefined && Math.abs(previous.top.value - top) < 40)
-        || (next !== undefined && Math.abs(next.top.value - top) < 40)
-      const covered = line.insideEvent || crowded
-      if (line.covered.value !== covered) line.covered.value = covered
-      if (covered) {
-        markerSlot = markerTop - top < 18 ? markerSlot + 1 : 0
-        markerTop = top
-      }
-      const offset = covered ? markerSlot * 18 : 0
-      if (line.markerOffset.value !== offset) line.markerOffset.value = offset
-    }
-  }
-}
-
-// 实时日期定位
-function getSchedulePosition(date: Date) {
-  const weekNumber = weekOf(calendarDate(date, timeZone.value))
-
-  return {
-    week: weekNumber,
-    weekday: dateToWeekday(date),
-    minutes: dateToMinutes(date) + clockParts(date, timeZone.value).second / 60,
-    inPhase: weekNumber >= 1 && weekNumber <= maxWeek
-  }
-}
-const currentPosition = computed(() => {
-  return now.value
-    ? getSchedulePosition(now.value)
-    : null
-})
-watch(
-  [() => currentPosition.value?.week, () => props.mode, () => props.weekdays?.join(','), timeZone],
-  ([currentWeek]) => {
-    if (currentWeek === undefined) return
-
-    week.value = props.mode === 'custom' ? currentWeek : Math.min(maxWeek, Math.max(1, currentWeek))
-    dayOffset.value = 0
-  },
-  { immediate: true }
-)
-const today = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
-const hasTodayColumn = computed(() => today.value !== null
-  && visibleColumns.value.some(column => column.date === today.value))
-const currentTimeY = computed(() => currentPosition.value
-  ? minutesToY(currentPosition.value.minutes)
-  : null)
-watch([tasks, events, visibleColumns, timeZone], rebuildTaskLines, { immediate: true, deep: true })
-watch([displayHourPixels, scheduleStartMinutes, edgePixels, () => focus.offsetY], updateTaskLinePositions)
-const viewport = ref<HTMLElement | null>(null)
-const scheduleBody = ref<HTMLElement | null>(null)
-const scheduleHeader = ref<HTMLElement | null>(null)
-
-function centerCurrentTime() {
-  if (!props.autoCenter || !hasTodayColumn.value || currentTimeY.value === null
-    || !viewport.value || !scheduleBody.value) return
-
-  // 首页滚动的是 PageCard；独立课程表则可能由整个页面滚动。
-  let container = viewport.value.parentElement
-  while (container && !/(auto|scroll|overlay)/.test(getComputedStyle(container).overflowY)) {
-    container = container.parentElement
-  }
-  const scroller = container ?? document.scrollingElement
-  if (!scroller) return
-
-  const isDocument = scroller === document.scrollingElement
-  const viewportTop = isDocument ? 0 : scroller.getBoundingClientRect().top + scroller.clientTop
-  const viewportHeight = isDocument ? window.innerHeight : scroller.clientHeight
-  const headerHeight = scheduleHeader.value?.offsetHeight ?? 0
-  const top = scroller.scrollTop + scheduleBody.value.getBoundingClientRect().top
-    - viewportTop + currentTimeY.value - (viewportHeight + headerHeight) / 2
-  scroller.scrollTop = Math.max(0, Math.min(top, scroller.scrollHeight - viewportHeight))
-}
-
-// 仅进入今日视图或开启定位时居中；时钟和 focus 更新不抢走手动滚动位置。
-watch(
-  [() => props.autoCenter, today, timeZone, visibleColumns, viewport, scheduleBody],
-  centerCurrentTime,
-  { flush: 'post' }
-)
-const backgroundSelection = shallowRef<BackgroundSelection | null>(null)
-const backgroundPending = ref(true)
-const background = ref<InstanceType<typeof Background> | null>(null)
-const backgroundRatio = ref<number>()
-let backgroundObserver: ResizeObserver | undefined
-watch(background, (component) => {
-  backgroundObserver?.disconnect()
-  const element = component?.$el as HTMLElement | undefined
-  if (!element) return
-  const resize = () => {
-    if (element.clientWidth && element.clientHeight) backgroundRatio.value = element.clientWidth / element.clientHeight
-  }
-  resize()
-  backgroundObserver = new ResizeObserver(resize)
-  backgroundObserver.observe(element)
-}, { flush: 'post' })
-onBeforeUnmount(() => backgroundObserver?.disconnect())
+const refreshTasks = () => props.refreshContent()
 </script>
 
 <template>
@@ -653,7 +739,7 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
       :class="{ 'schedule-tools--visible': systemMode === 'edit' }"
     >
       <BackgroundSelect
-        :background-key="`${backgroundKey ?? 'schedule'}:${phaseId}`"
+        :background-key="`${backgroundKey ?? 'schedule'}:${phase.id}`"
         :aspect-ratio="backgroundRatio"
         hide-selection
         @change="backgroundSelection = $event"
@@ -677,7 +763,7 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
       ref="background"
       class="event-schedule__background"
       :pending="backgroundPending"
-      :image="backgroundSelection?.image ?? '/images/bg.png'"
+      :image="backgroundSelection?.image ?? ''"
       :position="backgroundSelection?.position"
       :simplified-image="backgroundSelection?.simplifiedImage"
       :analysis="backgroundSelection?.analysis"
@@ -785,6 +871,7 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
             <TaskLine
               v-for="line in taskLines.get(column.key)"
               :key="line.key"
+              :change-task="props.changeTask"
               :top="line.top.value"
               :covered="line.covered.value"
               :marker-offset="line.markerOffset.value"
@@ -823,26 +910,40 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
     </Background>
     <EventEditPopup
       v-if="editingEventId !== null || creatingEvent"
+      :events="props.events"
+      :events-pending="props.eventsPending"
+      :refresh-events="props.refreshEvents"
       :event-id="editingEventId ?? undefined"
-      :phase-id="phaseId"
+      :phase-id="phase.id"
       :week-count="maxWeek"
       :open="true"
       @update:open="closeEventEditor"
-      @saved="refreshEvents"
+      @saved="contentSaved"
+      @deleted="contentSaved"
       @task-saved="refreshTasks"
+      @task-deleted="refreshTasks"
     />
   </div>
 </template>
 
 <style scoped>
-.schedule-tools { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.schedule-tools--visible { margin-bottom: 8px; }
 .schedule-viewport {
   width: 100%;
   min-width: 0;
   container-type: inline-size;
   container-name: schedule;
   overflow: visible;
+}
+
+.schedule-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.schedule-tools--visible {
+  margin-bottom: 8px;
 }
 
 .schedule-viewport > .event-schedule__background {
@@ -852,35 +953,10 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
 
 .schedule {
   --time-axis-width: 64px;
-
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
   border: 1px solid var(--border-color);
-}
-
-.hour-short {
-  display: none;
-}
-@container schedule (max-width: 600px) {
-  .hour-full {
-    display: none;
-  }
-
-  .hour-short {
-    display: inline;
-    font-size: 13px;
-  }
-  .schedule-header-time {
-    font-size: 10px;
-  }
-  .schedule-time-axis {
-    text-align: center;
-  }
-
-  .schedule {
-    --time-axis-width: 16px;
-  }
 }
 
 .schedule-header {
@@ -889,16 +965,9 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
   position: sticky;
   top: 0;
   z-index: 20;
-
   color: var(--text-primary);
   background-color: var(--background-secondary);
   border-bottom: 1px solid var(--border-color);
-}
-.schedule-body {
-  display: grid;
-  grid-template-columns: var(--schedule-columns);
-  position: relative;
-  overflow: clip;
 }
 
 .schedule-header-time {
@@ -921,23 +990,20 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
   box-sizing: border-box;
   padding: 4px 4px 17px;
 }
+
 .schedule-header-weekday--today {
   color: var(--text-primary);
   background-color: color-mix(in srgb, var(--text-secondary) 16%, var(--background-secondary));
   box-shadow: inset 0 -2px 0 var(--text-secondary);
   font-weight: 700;
 }
-.schedule-header-weekday--previous { padding-left: 22px; }
-.schedule-header-weekday--next { padding-right: 22px; }
 
-.schedule-header-label {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.schedule-header-weekday--previous {
+  padding-left: 22px;
 }
 
-@container schedule-weekday (width < 2.25em) {
-  .schedule-header-prefix { display: none; }
+.schedule-header-weekday--next {
+  padding-right: 22px;
 }
 
 .schedule-period-button {
@@ -962,10 +1028,21 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
   content: '';
 }
 
-.schedule-period-button--previous { left: 1px; }
-.schedule-period-button--next { right: 1px; }
-.schedule-period-button--previous::before { clip-path: polygon(100% 0, 0 50%, 100% 100%); }
-.schedule-period-button--next::before { clip-path: polygon(0 0, 100% 50%, 0 100%); }
+.schedule-period-button--previous {
+  left: 1px;
+}
+
+.schedule-period-button--next {
+  right: 1px;
+}
+
+.schedule-period-button--previous::before {
+  clip-path: polygon(100% 0, 0 50%, 100% 100%);
+}
+
+.schedule-period-button--next::before {
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
 
 .schedule-period-button:hover:not(:disabled) {
   color: var(--text-primary);
@@ -975,6 +1052,12 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
 .schedule-period-button:disabled {
   opacity: .3;
   cursor: default;
+}
+
+.schedule-header-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .schedule-header-date {
@@ -987,18 +1070,18 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
   color: var(--text-secondary);
 }
 
+.schedule-body {
+  display: grid;
+  grid-template-columns: var(--schedule-columns);
+  position: relative;
+  overflow: clip;
+}
+
 .schedule-time-axis {
   position: relative;
   overflow: hidden;
   color: var(--text-secondary);
   background-color: var(--background-secondary);
-}
-.schedule-day-column {
-  position: relative;
-  min-width: 0;
-  border-left: 1px solid var(--border-color);
-  container-type: inline-size;
-  container-name: schedule-day;
 }
 
 .schedule-hour-label {
@@ -1007,6 +1090,18 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
   right: 0;
   text-align: center;
   transform: translateY(-50%);
+}
+
+.hour-short {
+  display: none;
+}
+
+.schedule-day-column {
+  position: relative;
+  min-width: 0;
+  border-left: 1px solid var(--border-color);
+  container-type: inline-size;
+  container-name: schedule-day;
 }
 
 .schedule-hour-line {
@@ -1050,5 +1145,34 @@ onBeforeUnmount(() => backgroundObserver?.disconnect())
 
 .schedule-current-time__line--today {
   opacity: 1;
+}
+
+@container schedule (max-width: 600px) {
+  .schedule {
+    --time-axis-width: 16px;
+  }
+
+  .schedule-header-time {
+    font-size: 10px;
+  }
+
+  .schedule-time-axis {
+    text-align: center;
+  }
+
+  .hour-full {
+    display: none;
+  }
+
+  .hour-short {
+    display: inline;
+    font-size: 13px;
+  }
+}
+
+@container schedule-weekday (width < 2.25em) {
+  .schedule-header-prefix {
+    display: none;
+  }
 }
 </style>

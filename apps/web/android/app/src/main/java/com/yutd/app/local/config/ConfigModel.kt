@@ -16,5 +16,4 @@ interface ConfigDao {
 internal fun defaultConfig(): JSONObject = obj(
     "system" to obj("host" to "localhost", "port" to 0),
     "auth" to obj("enabled" to false, "expiresIn" to "30d", "salt" to "", "passwordHash" to ""),
-    "features" to obj("enableReminder" to false),
 )

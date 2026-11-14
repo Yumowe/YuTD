@@ -1,4 +1,4 @@
-import { BadRequestException, NotFoundException } from 'elysia-http-exception'
+import { BadRequestException, ConflictException, NotFoundException } from 'elysia-http-exception'
 import { prisma } from '#backend/lib/prisma'
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000
@@ -105,6 +105,12 @@ export abstract class PhaseService {
     const phase = await prisma.phase.findUnique({ where: { id } })
     if (!phase)
       throw new NotFoundException('阶段不存在')
+    const [events, tasks] = await Promise.all([
+      prisma.event.count({ where: { phaseId: id } }),
+      prisma.task.count({ where: { phaseId: id } }),
+    ])
+    if (events || tasks)
+      throw new ConflictException('阶段仍有关联事件或任务，不能删除')
     return prisma.phase.delete({ where: { id } })
   }
 }

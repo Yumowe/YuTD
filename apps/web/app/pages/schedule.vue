@@ -1,15 +1,54 @@
 <script setup lang="ts">
-import { useApi } from '~/composables/useApi'
+// 导入
+import type AppSidebar from '~/components/common/AppSidebar.vue'
+import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import EditPopup from '~/components/edit/EditPopup.vue'
 import type { EditField, EditValues } from '~/utils/editFields'
 
-type Preferences = ApiData<Api['api']['preferences']['get']>
-type ScheduleSettings = Pick<Preferences, 'maxFocusScale' | 'focusColumnScale' | 'hourPixels' | 'edgePixels'>
+// 页面配置与类型
+type ScheduleSettings = Pick<ApiData<Api['api']['preferences']['get']>, 'maxFocusScale' | 'focusColumnScale' | 'hourPixels' | 'edgePixels'>
+const emit = defineEmits<{ 'page-data': [data: InstanceType<typeof AppSidebar>['$props']] }>()
 
+// 系统变量读取
 const { mode } = useSystemStatus()
-const editOpen = ref(false)
-const editAnchor = ref<HTMLElement | null>(null)
-const preview = ref<EditValues | null>(null)
+const { preferences, loading: preferencesLoading } = useAppPeferences()
+
+// API 读取
+const phaseClient = reactive(useApi({
+  key: () => `phase:${preferences.value?.defaultPhaseId ?? 'none'}`,
+  read: async (api) => {
+    const id = preferences.value?.defaultPhaseId
+    return id == null ? null : api.api.phase({ id }).get()
+  },
+  watch: true
+}))
+const phasesClient = reactive(useApi({
+  key: 'phases',
+  read: api => api.api.phase.get(),
+  watch: true
+}))
+const eventsClient = reactive(useApi({
+  key: () => `events:${preferences.value?.defaultPhaseId ?? 'none'}`,
+  read: async (api) => {
+    const phaseId = preferences.value?.defaultPhaseId
+    return phaseId == null ? [] : api.api.event.get({ query: { phaseId } })
+  },
+  watch: true
+}))
+const tasksClient = reactive(useApi({
+  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}:all`,
+  read: async (api) => {
+    const phaseId = preferences.value?.defaultPhaseId
+    return phaseId == null ? [] : api.api.task.get({ query: { phaseId } })
+  },
+  write: (api, [id, change]: Parameters<ChangeTask>) => 'plannedDate' in change
+    ? api.api.task({ id }).postpone.patch(change)
+    : api.api.task({ id }).patch(change),
+  watch: true
+}))
+
+// 页面变量：普通变量
+let activated = false
 const editFields: EditField[] = [
   { key: 'maxFocusScale', label: '垂直聚焦增量', type: 'number', defaultValue: 2, min: 0, max: 5, step: 0.1, description: '实际聚焦倍数为 1 + 此值' },
   { key: 'focusColumnScale', label: '水平聚焦倍数', type: 'number', defaultValue: 3, min: 1, max: 6, step: 0.1, description: '实际倍数受显示列数限制' },
@@ -17,20 +56,24 @@ const editFields: EditField[] = [
   { key: 'edgePixels', label: '上下留白（px）', type: 'integer', defaultValue: 20, min: 0, max: 100, step: 1 }
 ]
 
-const preferencesClient = useApi({
-  key: 'preferences',
-  read: api => api.api.preferences.get(),
-  write: (api, value: ScheduleSettings) => api.api.preferences.patch(value)
-})
-const preferencesState = useAsyncData(preferencesClient.key, preferencesClient.read, { deep: true })
-const { data: preferences } = preferencesState
-const { data: phases } = useNuxtData<ApiData<Api['api']['phase']['get']>>('phases')
+// 页面变量：响应式数据
+const state = reactive({ pageActive: true, editOpen: false, preview: null as EditValues | null })
+const editAnchor = ref<HTMLElement | null>(null)
+
+// 计算属性
+const phases = computed(() => phasesClient.data)
+const phase = computed(() => phaseClient.data)
+const selectedPhaseId = computed(() => preferences.value?.defaultPhaseId ?? null)
+const loading = computed(() => preferencesLoading.value || phaseClient.read.loading.value)
 const savedSettings = computed<ScheduleSettings>(() => ({
   maxFocusScale: preferences.value?.maxFocusScale ?? 2,
   focusColumnScale: preferences.value?.focusColumnScale ?? 3,
   hourPixels: preferences.value?.hourPixels ?? 72,
   edgePixels: preferences.value?.edgePixels ?? 20
 }))
+const tableSettings = computed(() => toSettings(state.preview ?? savedSettings.value))
+
+// 方法
 function toSettings(values: EditValues): ScheduleSettings {
   return {
     maxFocusScale: Number(values.maxFocusScale),
@@ -39,33 +82,50 @@ function toSettings(values: EditValues): ScheduleSettings {
     edgePixels: Number(values.edgePixels)
   }
 }
-const tableSettings = computed(() => toSettings(preview.value ?? savedSettings.value))
-async function saveSettings(values: EditValues) {
-  preferences.value = await preferencesClient.write(toSettings(values))
-  await preferencesState.refresh()
+function saveSettings(values: EditValues) {
+  if (preferences.value) Object.assign(preferences.value, toSettings(values))
 }
-watch(mode, (value) => {
-  if (value !== 'edit') editOpen.value = false
-}, { flush: 'sync' })
-watch(editOpen, (open) => {
-  if (!open) preview.value = null
-}, { flush: 'sync' })
-const selectedPhaseId = computed(() => preferences.value?.defaultPhaseId ?? null)
+async function refreshContent() {
+  await Promise.all([
+    phasesClient.read(),
+    eventsClient.read(),
+    tasksClient.read(),
+    phaseClient.read()
+  ])
+}
 
-const phaseClient = useApi({
-  key: () => `phase:${selectedPhaseId.value ?? 'none'}`,
-  read: async api => selectedPhaseId.value === null
-    ? null
-    : api.api.phase({ id: selectedPhaseId.value }).get()
+async function changeTask(...args: Parameters<ChangeTask>) {
+  const task = await tasksClient.write(args)
+  await refreshContent()
+  return task
+}
+
+// 监听
+watch(mode, (value) => {
+  if (value !== 'edit') state.editOpen = false
+}, { flush: 'sync' })
+watch(() => state.editOpen, (open) => {
+  if (!open) state.preview = null
+}, { flush: 'sync' })
+watchEffect(() => {
+  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read, refreshContent })
 })
-const phaseClientState = useAsyncData(phaseClient.key, phaseClient.read, { deep: true })
-const { data: phase, pending: loading, refresh } = phaseClientState
+
+// 生命周期
+onActivated(() => {
+  state.pageActive = true
+  if (activated) void refreshContent().catch(() => {})
+  activated = true
+})
+onDeactivated(() => {
+  state.pageActive = false
+})
 </script>
 
 <template>
   <main class="schedule-page">
     <p
-      v-if="loading && !phase && selectedPhaseId !== null"
+      v-if="loading && !phase"
       class="page-state"
       role="status"
     >
@@ -102,9 +162,15 @@ const { data: phase, pending: loading, refresh } = phaseClientState
     <ScheduleTable
       v-else-if="phase && phase.id === selectedPhaseId"
       :key="phase.id"
-      :phase-id="phase.id"
+      :events="eventsClient.data"
+      :tasks="tasksClient.data"
+      :events-pending="eventsClient.read.loading.value"
+      :refresh-events="eventsClient.read"
+      :refresh-content="refreshContent"
+      :change-task="changeTask"
+      :phase="phase"
       v-bind="tableSettings"
-      mode="easy"
+      mode="full"
     />
     <div
       v-else
@@ -114,7 +180,7 @@ const { data: phase, pending: loading, refresh } = phaseClientState
       <button
         class="button"
         type="button"
-        @click="refresh()"
+        @click="phaseClient.read()"
       >
         重新加载
       </button>
@@ -124,8 +190,8 @@ const { data: phase, pending: loading, refresh } = phaseClientState
       ref="editAnchor"
       class="button schedule-edit-trigger"
       type="button"
-      :aria-expanded="editOpen"
-      @click="editOpen = !editOpen"
+      :aria-expanded="state.editOpen"
+      @click="state.editOpen = !state.editOpen"
     >
       <Icon
         name="lucide:sliders-horizontal"
@@ -135,13 +201,13 @@ const { data: phase, pending: loading, refresh } = phaseClientState
     </button>
     <EditPopup
       v-if="mode === 'edit' && preferences"
-      v-model:open="editOpen"
+      v-model:open="state.editOpen"
       title="课程表参数"
       :anchor="editAnchor"
       :fields="editFields"
       :values="savedSettings"
       :save="saveSettings"
-      @change="preview = editOpen ? $event : null"
+      @change="state.preview = state.editOpen ? $event : null"
     />
   </main>
 </template>

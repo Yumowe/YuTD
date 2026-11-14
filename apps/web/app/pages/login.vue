@@ -1,39 +1,46 @@
 <script setup lang="ts">
-import { requestApiData } from '~/utils/api'
+// 页面配置与类型
+useHead({ title: '登录 · YuTD' })
 
-const { $api } = useNuxtApp()
-const { reportError } = useAppErrors()
+// 系统变量读取
 const route = useRoute()
 const authToken = useCookie<string | null>('yutd-auth-token', { path: '/', sameSite: 'lax', maxAge: 60 * 60 * 24 * 30 })
-const password = ref('')
-const pending = ref(false)
-const error = ref('')
 
-async function login() {
-  if (pending.value || !password.value) return
-  pending.value = true
-  error.value = ''
-  try {
-    const result = await requestApiData($api.api.auth.login.post({ password: password.value }), '验证失败')
+// API 读取
+const client = reactive(useApi({
+  key: 'auth:login',
+  write: async (api, password: string) => {
+    const result = await requestApiData(api.api.auth.login.post({ password }))
     if (!result.token) throw new Error('服务器未返回登录凭证')
-    authToken.value = result.token
-    password.value = ''
-    await nextTick()
-    const redirect = route.query.redirect
-    const target = typeof redirect === 'string' && /^\/(?!\/)/.test(redirect) && !/[\\\r\n]/.test(redirect)
-      && !/^\/login\/?(?:[?#]|$)/.test(redirect)
-      ? redirect
-      : '/'
-    await navigateTo(target, { external: true, replace: true })
-  } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '验证失败，请重试'
-    reportError(reason, '登录验证失败')
-  } finally {
-    pending.value = false
+    return result
   }
-}
+}))
 
-useHead({ title: '登录 · YuTD' })
+// 页面变量：响应式数据
+const state = reactive({ password: '', error: '' })
+
+// 计算属性
+const pending = computed(() => client.write.saving.value)
+
+// 方法
+async function login() {
+  if (pending.value || !state.password) return
+  state.error = ''
+  const result = await client.write(state.password).catch((error) => {
+    state.error = error instanceof Error ? error.message : '验证失败，请重试'
+    return undefined
+  })
+  if (!result) return
+  authToken.value = result.token
+  state.password = ''
+  await nextTick()
+  const redirect = route.query.redirect
+  const target = typeof redirect === 'string' && /^\/(?!\/)/.test(redirect) && !/[\\\r\n]/.test(redirect)
+    && !/^\/login\/?(?:[?#]|$)/.test(redirect)
+    ? redirect
+    : '/'
+  await navigateTo(target, { external: true, replace: true })
+}
 </script>
 
 <template>
@@ -50,7 +57,7 @@ useHead({ title: '登录 · YuTD' })
       <label for="password">服务器密码</label>
       <input
         id="password"
-        v-model="password"
+        v-model="state.password"
         type="password"
         autocomplete="current-password"
         autofocus
@@ -58,16 +65,16 @@ useHead({ title: '登录 · YuTD' })
         :disabled="pending"
       >
       <p
-        v-if="error"
+        v-if="state.error"
         class="login-error"
         role="alert"
       >
-        {{ error }}
+        {{ state.error }}
       </p>
       <button
         class="button"
         type="submit"
-        :disabled="pending || !password"
+        :disabled="pending || !state.password"
       >
         {{ pending ? '正在验证……' : '验证并返回' }}
       </button>

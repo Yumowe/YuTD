@@ -26,4 +26,5 @@ interface ImageDao {
     @Query("SELECT * FROM image_backgrounds WHERE backgroundKey = :key") suspend fun background(key: String): BackgroundRecord?
     @Query("SELECT * FROM image_backgrounds WHERE imageId = :id ORDER BY backgroundKey") suspend fun backgrounds(id: String): List<BackgroundRecord>
     @Upsert suspend fun saveBackground(value: BackgroundRecord)
+    @Query("DELETE FROM image_backgrounds WHERE backgroundKey = :key") suspend fun deleteBackground(key: String)
 }

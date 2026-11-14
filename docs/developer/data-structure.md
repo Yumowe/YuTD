@@ -91,6 +91,6 @@ Image 图片 ── ImageBackground 背景绑定
 
 Web 的系统配置保存在 YAML 中，通过服务端认证逻辑签发 JWT。Android 将本地配置放在 `local_config`，将会话令牌的散列与有效期放在 `local_sessions`，通过 `LocalDatabase` 统一检查访问权限。两端的令牌不能互用。
 
-`/api/version` 返回数据版本，前端据此判断读取缓存是否失效。它与 Room 的数据库结构版本是两回事：前者随业务变化，后者用于表结构迁移，Android 当前结构版本为 `2`。
+`/api/version` 返回数据版本，前端据此判断读取缓存是否失效。它与 Room 的数据库结构版本是两回事：前者随业务变化，后者用于表结构迁移，Android 当前结构版本基线为 `1`，新库的数据版本也从 `1` 开始。任务提醒在 Prisma 中为 `DateTime`，Android 本地库为 UTC 毫秒整数，两端接口都使用标准日期时间。提醒总开关、课程与任务开关、提前分钟数、通知标题和正文模板均属于 Preferences，不再属于 config.yaml。
 
 目前的数据版本还参与跨日刷新等缓存逻辑，不能直接当作多端同步协议。`remote-local` 同步仍处于设计阶段。

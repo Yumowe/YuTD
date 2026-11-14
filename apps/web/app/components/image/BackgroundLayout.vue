@@ -2,6 +2,7 @@
 import type { ImageCropInfo } from './ImageCropper.vue'
 import { provideBackground, loadBackgroundImage } from './background'
 import { GlassLayerKey, type GlassLayerContext } from '../preview/card/glass/edges'
+import { blockColors } from '../preview/card/cardMaterial'
 import type { SimplifiedImageData } from '~/utils/simplifyImage'
 
 const props = withDefaults(defineProps<{
@@ -39,12 +40,17 @@ const active = computed(() => incomingShown.value ? incoming.value : current.val
 const context = provideBackground(root, computed(() => active.value?.image?.image.src ?? active.value?.simplified?.image.src ?? ''), computed(() => active.value?.source.position))
 const geometry = context.geometry
 const viewport = context.size
+const { style } = useAppStyle()
+const plainAnalysis = computed<SimplifiedImageData | undefined>(() => {
+  const color = blockColors(style.value?.backgroundPrimary ?? '#f5f7fb')?.color
+  return color ? { width: 1, height: 1, palette: [color], labels: [0] } : undefined
+})
 const imageId = useId()
 const windows = shallowReactive<GlassLayerContext['windows']>(new Map())
 provide(GlassLayerKey, {
   windows,
   image: computed(() => active.value?.simplified?.image.src),
-  analysis: computed(() => active.value?.source.analysis)
+  analysis: computed(() => active.value ? active.value.source.analysis : plainAnalysis.value)
 })
 const frames = computed(() => [...windows].map(([id, glass]) => ({ id, ...glass.frame.value, radius: glass.radius.value, original: glass.showOriginal.value, simplifiedOpacity: glass.simplifiedOpacity?.value }))
   .filter(frame => frame.width > 0 && frame.height > 0))
@@ -247,6 +253,18 @@ onMounted(() => {
       loading.value = 1
       return
     }
+    if (!image && !simplifiedImage) {
+      queued = undefined
+      retire(current.value)
+      retire(incoming.value)
+      current.value = null
+      incoming.value = null
+      incomingShown.value = false
+      fading.value = null
+      progress.value = 1
+      loading.value = 0
+      return
+    }
     const source = { image, simplifiedImage, position, analysis }
     const picture = incoming.value ?? current.value
     if (picture && picture.source.image === image && picture.source.simplifiedImage === simplifiedImage) {
@@ -417,7 +435,7 @@ defineExpose({ geometry: context.geometry, imageUrl: context.src, loading, maskM
 </template>
 
 <style scoped>
-.background-layout { position: relative; width: 100%; height: 100%; overflow: hidden; }
+.background-layout { position: relative; width: 100%; height: 100%; overflow: hidden; background: var(--background-primary); }
 .background-layout__image, .background-layout__glass { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; user-select: none; }
 .background-layout__content { position: relative; width: 100%; height: 100%; }
 </style>

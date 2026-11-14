@@ -5,19 +5,21 @@ import ColorCountSelect from './ColorCountSelect.vue'
 import { simplifyImage } from '~/utils/simplifyImage'
 
 defineProps<{ aspectRatio?: number }>()
+const emit = defineEmits<{ submitted: [], uploaded: [] }>()
 const { reportError } = useAppErrors()
 const colors = ref<number | 'auto'>('auto')
 const client = useApi({
   key: 'image:upload',
-  write: async (api, file: File) => api.api.image.post({
-    file,
-    thumbnail: new File([await simplifyImage(file, 'png', { colors: colors.value })], 'thumbnail.png', { type: 'image/png' })
+  write: async (api, task: { file: File, colors: number | 'auto' }) => api.api.image.post({
+    file: task.file,
+    thumbnail: new File([await simplifyImage(task.file, 'png', { colors: task.colors })], 'thumbnail.png', { type: 'image/png' })
   })
 })
 const input = ref<HTMLInputElement | null>(null)
 const source = ref('')
 const name = ref('image.png')
-const uploading = ref(false)
+const uploading = client.write.saving
+let disposed = false
 const cropOpen = computed({
   get: () => Boolean(source.value),
   set: (value: boolean) => {
@@ -34,26 +36,26 @@ function selectFile(event: Event) {
   const target = event.target as HTMLInputElement
   const file = target.files?.[0]
   target.value = ''
-  if (!file || uploading.value) return
+  if (!file) return
   clearSource()
   source.value = URL.createObjectURL(file)
   name.value = `${file.name.replace(/\.[^.]+$/, '')}.png`
 }
 
-async function upload(blob: Blob) {
-  if (uploading.value) return
-  uploading.value = true
-  try {
-    await client.write(new File([blob], name.value, { type: blob.type }))
-    clearSource()
-  } catch {
-    // useApi 已统一上报，保留裁剪界面供重试。
-  } finally {
-    uploading.value = false
-  }
+function upload(blob: Blob) {
+  if (!source.value) return
+  const task = { file: new File([blob], name.value, { type: blob.type }), colors: colors.value }
+  clearSource()
+  void client.write(task).then(() => {
+    if (!disposed) emit('uploaded')
+  }).catch(() => {})
+  emit('submitted')
 }
 
-onBeforeUnmount(clearSource)
+onBeforeUnmount(() => {
+  disposed = true
+  clearSource()
+})
 
 defineExpose({ uploading, source, open: () => input.value?.click() })
 </script>
@@ -66,23 +68,21 @@ defineExpose({ uploading, source, open: () => input.value?.click() })
     <button
       class="button image-select-button"
       type="button"
-      :disabled="uploading"
-      :aria-label="uploading ? '正在上传图片' : '上传图片'"
-      :title="uploading ? '正在上传图片' : '上传图片'"
+      aria-label="上传图片"
+      title="上传图片"
       @click="input?.click()"
     >
       <Icon
         name="lucide:image-plus"
         aria-hidden="true"
       />
-      <span class="image-select-button__label">{{ uploading ? '正在上传……' : '上传图片' }}</span>
+      <span class="image-select-button__label">上传图片</span>
     </button>
     <input
       ref="input"
       type="file"
       accept="image/*"
       hidden
-      :disabled="uploading"
       aria-label="上传图片"
       @change="selectFile"
     >
@@ -90,16 +90,13 @@ defineExpose({ uploading, source, open: () => input.value?.click() })
       v-model:open="cropOpen"
       title="裁剪图片"
       class="image-uploader__crop-popup"
-      :dismissible="!uploading"
     >
       <ColorCountSelect
         v-model="colors"
-        :disabled="uploading"
       />
       <ImageCropper
         :src="source"
         :aspect-ratio="aspectRatio"
-        :inert="uploading"
         @image="upload"
         @error="reportError($event, '裁剪图片')"
       />

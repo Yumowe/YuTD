@@ -6,7 +6,7 @@ export const ImageModel = {
   backgroundQuery: t.Object({ backgroundKey: t.String({ minLength: 1, maxLength: 240 }) }),
   background: t.Object({
     backgroundKey: t.String({ minLength: 1, maxLength: 240 }),
-    imageId: t.String({ format: 'uuid' }),
+    imageId: t.Nullable(t.String({ format: 'uuid' })),
     position: t.Optional(t.Object({
       originalWidth: t.Number({ exclusiveMinimum: 0 }), originalHeight: t.Number({ exclusiveMinimum: 0 }),
       x: t.Number({ minimum: 0 }), y: t.Number({ minimum: 0 }),
