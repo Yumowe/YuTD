@@ -13,6 +13,15 @@ const fields = {
   edgePixels: t.Integer({ minimum: 0, maximum: 100 }),
   timeZone: t.String({ minLength: 1, maxLength: 100 }),
   timeZoneAutomatic: t.Boolean(),
+  enableReminder: t.Boolean(),
+  enableEventReminder: t.Boolean(),
+  eventReminderMinutes: t.Integer({ minimum: 0, maximum: 10080 }),
+  eventReminderTitle: t.String({ minLength: 1, maxLength: 200 }),
+  eventReminderBody: t.String({ minLength: 1, maxLength: 2000 }),
+  enableTaskReminder: t.Boolean(),
+  taskReminderMinutes: t.Integer({ minimum: 0, maximum: 10080 }),
+  taskReminderTitle: t.String({ minLength: 1, maxLength: 200 }),
+  taskReminderBody: t.String({ minLength: 1, maxLength: 2000 }),
 }
 export const PreferencesModel = {
   replace: t.Object(fields),

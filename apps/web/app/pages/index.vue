@@ -1,46 +1,107 @@
 <script setup lang="ts">
-import TaskAttentionList from '~/components/preview/Task/TaskAttentionList.vue'
-import { useApi } from '~/composables/useApi'
+// 导入
+import type AppSidebar from '~/components/common/AppSidebar.vue'
+import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
+import TaskAttentionBar from '~/components/preview/Task/TaskAttentionBar.vue'
 
-const preferencesClient = useApi({
-  key: 'preferences',
-  read: api => api.api.preferences.get(),
-  write: (api, value: ApiData<Api['api']['preferences']['get']>) => api.api.preferences.put(value)
-})
-const preferencesClientState = useAsyncData(preferencesClient.key, preferencesClient.read, { deep: true })
-const { data: preferences } = preferencesClientState
-const { data: phases } = useNuxtData<ApiData<Api['api']['phase']['get']>>('phases')
+// 页面配置与类型
+const emit = defineEmits<{ 'page-data': [data: InstanceType<typeof AppSidebar>['$props']] }>()
 
-const selectedPhaseId = computed(() => preferences.value?.defaultPhaseId ?? null)
+// 系统变量读取
 const { now, timeZone } = useSystemTime()
+const { preferences, loading: preferencesLoading } = useAppPeferences()
+
+// API 读取
+const phaseClient = reactive(useApi({
+  key: () => `phase:${preferences.value?.defaultPhaseId ?? 'none'}`,
+  read: async (api) => {
+    const id = preferences.value?.defaultPhaseId
+    return id == null ? null : api.api.phase({ id }).get()
+  },
+  watch: true
+}))
+const phasesClient = reactive(useApi({
+  key: 'phases',
+  read: api => api.api.phase.get(),
+  watch: true
+}))
+const eventsClient = reactive(useApi({
+  key: () => `events:${preferences.value?.defaultPhaseId ?? 'none'}`,
+  read: async (api) => {
+    const phaseId = preferences.value?.defaultPhaseId
+    return phaseId == null ? [] : api.api.event.get({ query: { phaseId } })
+  },
+  watch: true
+}))
+const tasksClient = reactive(useApi({
+  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}:all`,
+  read: async (api) => {
+    const phaseId = preferences.value?.defaultPhaseId
+    return phaseId == null ? [] : api.api.task.get({ query: { phaseId } })
+  },
+  write: (api, [id, change]: Parameters<ChangeTask>) => 'plannedDate' in change
+    ? api.api.task({ id }).postpone.patch(change)
+    : api.api.task({ id }).patch(change),
+  watch: true
+}))
+const dailyTipsClient = reactive(useApi({
+  key: () => `dailytips:v2:${preferences.value?.defaultPhaseId ?? 'all'}:${now.value ? calendarDate(now.value, timeZone.value) : 'pending'}:${timeZone.value}`,
+  read: async (api) => {
+    const phase = preferences.value?.defaultPhaseId
+    const date = now.value ? calendarDate(now.value, timeZone.value) : ''
+    return phase == null || !date ? null : api.api.dailytips.get({ query: { phase, date } })
+  },
+  watch: true
+}))
+
+// 页面变量：普通变量
+let activated = false
+
+// 页面变量：响应式数据
+const state = reactive({ pageActive: true })
+
+// 计算属性
+const tipTasks = computed(() => dailyTipsClient.data?.tasks.map(task => tasksClient.data?.find(value => value.id === task.id) ?? task))
+const phases = computed(() => phasesClient.data)
+const phase = computed(() => phaseClient.data)
+const selectedPhaseId = computed(() => preferences.value?.defaultPhaseId ?? null)
+const loading = computed(() => preferencesLoading.value || phaseClient.read.loading.value)
 const displayedDay = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
 const displayedWeekdays = computed(() => displayedDay.value
   ? [calendarWeekday(displayedDay.value), calendarWeekday(addCalendarDays(displayedDay.value, 1))]
   : [])
 
-const phaseClient = useApi({
-  key: () => `phase:${selectedPhaseId.value ?? 'none'}`,
-  read: async api => selectedPhaseId.value === null
-    ? null
-    : api.api.phase({ id: selectedPhaseId.value }).get()
-})
-const phaseClientState = useAsyncData(phaseClient.key, phaseClient.read, { deep: true })
-const { data: phase, pending: loading, refresh } = phaseClientState
+// 方法
+async function refreshContent() {
+  await Promise.all([
+    phasesClient.read(),
+    eventsClient.read(),
+    tasksClient.read(),
+    phaseClient.read(),
+    dailyTipsClient.read()
+  ])
+}
 
-function EventHover(id: number | null) {
-  if (id !== null) {
-    console.log(`Hovered Event ID: ${id}`)
-  } else {
-    console.log('No event hovered')
-  }
+async function changeTask(...args: Parameters<ChangeTask>) {
+  const task = await tasksClient.write(args)
+  await refreshContent()
+  return task
 }
-function TaskHover(id: number | null) {
-  if (id !== null) {
-    console.log(`Hovered Task ID: ${id}`)
-  } else {
-    console.log('No task hovered')
-  }
-}
+
+// 监听
+watchEffect(() => {
+  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read, refreshContent })
+})
+
+// 生命周期
+onActivated(() => {
+  state.pageActive = true
+  if (activated) void refreshContent().catch(() => {})
+  activated = true
+})
+onDeactivated(() => {
+  state.pageActive = false
+})
 </script>
 
 <template>
@@ -52,7 +113,7 @@ function TaskHover(id: number | null) {
       height="100%"
     >
       <p
-        v-if="loading && selectedPhaseId !== null"
+        v-if="loading"
         class="page-state"
         role="status"
       >
@@ -91,13 +152,6 @@ function TaskHover(id: number | null) {
         class="page-state"
       >
         <p>阶段尚未载入。</p>
-        <button
-          class="button"
-          type="button"
-          @click="refresh()"
-        >
-          重新加载
-        </button>
       </div>
     </PageCard>
     <div
@@ -113,13 +167,17 @@ function TaskHover(id: number | null) {
         <ScheduleTable
           v-if="displayedWeekdays.length"
           :key="phase.id"
-          :phase-id="phase.id"
+          :events="eventsClient.data"
+          :tasks="tasksClient.data"
+          :events-pending="eventsClient.read.loading.value"
+          :refresh-events="eventsClient.read"
+          :refresh-content="refreshContent"
+          :change-task="changeTask"
+          :phase="phase"
           mode="custom"
           background-key="home:schedule"
           :weekdays="displayedWeekdays"
           auto-center
-          @event-hover="EventHover($event)"
-          @task-hover="TaskHover($event)"
         />
         <p
           v-else
@@ -135,9 +193,17 @@ function TaskHover(id: number | null) {
         height="100%"
         aria-label="任务"
       >
-        <TaskAttentionList
+        <TaskAttentionBar
+          :key="phase.id"
           :phase-id="phase.id"
-          @task-hover="TaskHover($event)"
+          :events="eventsClient.data"
+          :tasks="tasksClient.data ?? []"
+          :events-pending="eventsClient.read.loading.value"
+          :refresh-events="eventsClient.read"
+          :change-task="changeTask"
+          :end-date="phase.endDate"
+          @saved="refreshContent"
+          @deleted="refreshContent"
         />
       </PageCard>
       <PageCard
@@ -152,7 +218,15 @@ function TaskHover(id: number | null) {
         height="100%"
         aria-label="每日提示"
       >
-        <DailyTips :phase-id="phase.id" />
+        <DailyTips
+          :tips="dailyTipsClient.data?.tips"
+          :occurrences="dailyTipsClient.data?.occurrences"
+          :snapshot-date="dailyTipsClient.data?.date"
+          :pending="dailyTipsClient.read.loading.value"
+          :tasks="tipTasks"
+          :phase-id="phase.id"
+          @refresh="dailyTipsClient.read()"
+        />
       </PageCard>
     </div>
   </main>
@@ -204,5 +278,21 @@ function TaskHover(id: number | null) {
 
 .home-page__tips {
   grid-area: tips;
+}
+
+@media (width < 480px) {
+  .home-page {
+    gap: 0;
+    padding: 0;
+  }
+
+  .home-page__layout {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 6fr);
+    gap: 0;
+  }
+
+  .home-page__schedule {
+    padding: 0;
+  }
 }
 </style>

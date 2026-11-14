@@ -2,10 +2,18 @@
 interface PopupEntry {
   element: HTMLElement
   close: (restoreFocus?: boolean) => void
+  requestClose: () => void
 }
 
 const popupStack: PopupEntry[] = []
 const scrollLocks = new WeakMap<Document, { count: number, overflow: string, gutter: string }>()
+
+export function handlePopupBack() {
+  const popup = popupStack.at(-1)
+  if (!popup) return false
+  popup.requestClose()
+  return true
+}
 
 function lockScroll(document: Document) {
   const style = document.documentElement.style
@@ -27,11 +35,17 @@ function lockScroll(document: Document) {
 
 <script setup lang="ts">
 const props = withDefaults(defineProps<{
+  /** 弹层形式：对话框、浮层或内嵌面板。 */
   mode?: 'dialog' | 'popover' | 'panel'
+  /** 弹层定位的锚点元素。 */
   anchor?: HTMLElement | null
+  /** 弹窗标题。 */
   title?: string
+  /** 是否允许关闭。 */
   dismissible?: boolean
+  /** 是否允许点击外部关闭。 */
   closeOnOutside?: boolean
+  /** 是否允许按 Esc 关闭。 */
   closeOnEsc?: boolean
 }>(), {
   mode: 'dialog',
@@ -41,19 +55,33 @@ const props = withDefaults(defineProps<{
   closeOnOutside: true,
   closeOnEsc: true
 })
+
 const opened = defineModel<boolean>('open', { default: false })
+
 const emit = defineEmits<{ open: [], close: [] }>()
+
 const { reportError } = useAppErrors()
+
 const element = ref<HTMLElement | null>(null)
+
 const active = ref(false)
+
 const titleId = useId()
+
 let visible = false
+
 let revision = 0
+
 let entry: PopupEntry | undefined
+
 let previousFocus: HTMLElement | null = null
+
 let releaseScroll: (() => void) | undefined
+
 let observer: ResizeObserver | undefined
+
 let positionFrame: number | undefined
+
 let pointerDown: { id: number, outside: boolean } | undefined
 
 function isTop() {
@@ -65,11 +93,14 @@ function position() {
   if (!visible || !node) return
   const viewport = window.visualViewport
   const safeArea = getComputedStyle(document.documentElement)
+  const compact = (viewport?.width ?? window.innerWidth) < 480
+  const gapX = compact ? 20 : 12
+  const gapY = compact ? 24 : 12
   const inset = (edge: string) => Number.parseFloat(safeArea.getPropertyValue(`--app-safe-${edge}`)) || 0
-  const left = (viewport?.offsetLeft ?? 0) + inset('left') + 12
-  const top = (viewport?.offsetTop ?? 0) + inset('top') + 12
-  const width = Math.max(0, (viewport?.width ?? window.innerWidth) - inset('left') - inset('right') - 24)
-  const height = Math.max(0, (viewport?.height ?? window.innerHeight) - inset('top') - inset('bottom') - 24)
+  const left = (viewport?.offsetLeft ?? 0) + inset('left') + gapX
+  const top = (viewport?.offsetTop ?? 0) + inset('top') + gapY
+  const width = Math.max(0, (viewport?.width ?? window.innerWidth) - inset('left') - inset('right') - gapX * 2)
+  const height = Math.max(0, (viewport?.height ?? window.innerHeight) - inset('top') - inset('bottom') - gapY * 2)
   node.style.maxWidth = `${width}px`
   node.style.maxHeight = `${height}px`
   const popupWidth = node.offsetWidth
@@ -109,35 +140,6 @@ function outside(event: PointerEvent) {
   const rect = element.value.getBoundingClientRect()
   return event.clientX < rect.left || event.clientX > rect.right
     || event.clientY < rect.top || event.clientY > rect.bottom
-}
-
-function onPointerDown(event: PointerEvent) {
-  pointerDown = isTop() && event.button === 0
-    ? { id: event.pointerId, outside: outside(event) }
-    : undefined
-}
-
-function onPointerUp(event: PointerEvent) {
-  const dismiss = isTop() && props.closeOnOutside && pointerDown?.id === event.pointerId
-    && pointerDown.outside && outside(event)
-  pointerDown = undefined
-  if (dismiss) requestClose()
-}
-
-function onKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || event.defaultPrevented || !isTop() || props.mode !== 'popover') return
-  event.preventDefault()
-  event.stopPropagation()
-  if (props.closeOnEsc) requestClose()
-}
-
-function requestClose() {
-  if (props.dismissible) close()
-}
-
-function onCancel(event: Event) {
-  event.preventDefault()
-  if (isTop() && props.closeOnEsc) requestClose()
 }
 
 function removeListeners() {
@@ -199,7 +201,7 @@ async function syncOpen() {
   const node = element.value
   if (current !== revision || !opened.value || !node?.isConnected) return
   previousFocus = props.anchor ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null)
-  entry = { element: node, close }
+  entry = { element: node, close, requestClose }
   popupStack.push(entry)
   visible = true
   try {
@@ -225,16 +227,47 @@ async function syncOpen() {
   }
 }
 
+watch(() => props.anchor, observeSize)
+
+onMounted(() => {
+  watch(opened, syncOpen, { immediate: true, flush: 'post' })
+})
+
+onBeforeUnmount(() => close())
+
+function onPointerDown(event: PointerEvent) {
+  pointerDown = isTop() && event.button === 0
+    ? { id: event.pointerId, outside: outside(event) }
+    : undefined
+}
+
+function onPointerUp(event: PointerEvent) {
+  const dismiss = isTop() && props.closeOnOutside && pointerDown?.id === event.pointerId
+    && pointerDown.outside && outside(event)
+  pointerDown = undefined
+  if (dismiss) requestClose()
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Escape' || event.defaultPrevented || !isTop() || props.mode !== 'popover') return
+  event.preventDefault()
+  event.stopPropagation()
+  if (props.closeOnEsc) requestClose()
+}
+
+function requestClose() {
+  if (props.dismissible) close()
+}
+
+function onCancel(event: Event) {
+  event.preventDefault()
+  if (isTop() && props.closeOnEsc) requestClose()
+}
+
 function onNativeClose() {
   const node = element.value
   if (visible && node && (node instanceof HTMLDialogElement ? !node.open : !node.matches(':popover-open'))) close()
 }
-
-watch(() => props.anchor, observeSize)
-onMounted(() => {
-  watch(opened, syncOpen, { immediate: true, flush: 'post' })
-})
-onBeforeUnmount(() => close())
 </script>
 
 <template>
@@ -316,4 +349,17 @@ onBeforeUnmount(() => close())
 .app-popup__header h2 { min-width: 0; margin: 0; overflow-wrap: anywhere; font-size: 16px; }
 .app-popup__header-actions { display: flex; align-items: center; flex-shrink: 0; gap: 6px; margin-left: auto; }
 .app-popup__header button { flex-shrink: 0; }
+@media (width < 480px) {
+  .app-popup { box-sizing: border-box; width: min(var(--popup-width, 560px), calc(100vw - 40px)); padding: 12px; border-radius: 10px; font-size: 13px; }
+  .app-popup:not(.app-popup--group):not(.app-popup--panel):not(.app-popup--popover) { padding: 12px; }
+  .app-popup--panel { width: 100%; }
+  .app-popup--group, .app-popup--popover { padding: 0; }
+  .app-popup__header { gap: 8px; margin-bottom: 10px; }
+  .app-popup__header h2 { font-size: 14px; }
+  .app-popup--group > .app-popup__main { padding: 12px; border-radius: 10px; }
+  .app-popup :deep(.panel-stack) { gap: 10px; }
+  .app-popup :deep(.panel-title) { font-size: 14px; }
+  .app-popup :deep(.form-control) { min-height: 34px; padding: 7px 9px; font-size: 13px; }
+  .app-popup :deep(.button) { min-height: 32px; padding: 6px 9px; font-size: 12px; }
+}
 </style>

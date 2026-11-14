@@ -34,6 +34,15 @@ class PreferencesService internal constructor(private val database: LocalDatabas
             throw LocalApiException("时区必须是有效的 IANA 时区，例如 Asia/Shanghai")
         }
         val result = current.copy(
+            enableReminder = data.flag("enableReminder", current.enableReminder),
+            enableEventReminder = data.flag("enableEventReminder", current.enableEventReminder),
+            eventReminderMinutes = data.decimal("eventReminderMinutes", current.eventReminderMinutes.toDouble(), 0.0, 10080.0, true).toInt(),
+            eventReminderTitle = reminderTemplate(data.boundedText("eventReminderTitle", current.eventReminderTitle, 200), true),
+            eventReminderBody = reminderTemplate(data.boundedText("eventReminderBody", current.eventReminderBody, 2000), true),
+            enableTaskReminder = data.flag("enableTaskReminder", current.enableTaskReminder),
+            taskReminderMinutes = data.decimal("taskReminderMinutes", current.taskReminderMinutes.toDouble(), 0.0, 10080.0, true).toInt(),
+            taskReminderTitle = reminderTemplate(data.boundedText("taskReminderTitle", current.taskReminderTitle, 200)),
+            taskReminderBody = reminderTemplate(data.boundedText("taskReminderBody", current.taskReminderBody, 2000)),
             defaultLocale = data.boundedText("defaultLocale", current.defaultLocale, 40),
             defaultPhaseId = phaseId,
             activeStyleId = styleId,
@@ -53,5 +62,13 @@ class PreferencesService internal constructor(private val database: LocalDatabas
         val result = PreferencesRecord(activeStyleId = database.styles.initialize().id)
         dao.savePreferences(result)
         result
+    }
+
+    private fun reminderTemplate(value: String, event: Boolean = false): String {
+        val tokens = setOf("title", "time", "task", "event", "tips") + if (event) setOf("location") else setOf("description")
+        for (match in Regex("\\{\\{\\s*([^{}]+?)\\s*\\}\\}").findAll(value)) {
+            if (match.groupValues[1] !in tokens) throw LocalApiException("不支持的提醒占位符：${match.groupValues[1]}")
+        }
+        return value
     }
 }

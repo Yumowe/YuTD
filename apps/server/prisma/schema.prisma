@@ -11,7 +11,7 @@ datasource db {
 
 model ServerInfo {
   id        Int      @id @default(1)
-  version   BigInt   @default(0)
+  version   BigInt   @default(1)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -218,6 +218,15 @@ model Preferences{
   edgePixels              Int      @default(20)
   timeZone                String?
   timeZoneAutomatic       Boolean  @default(true)
+  enableReminder          Boolean  @default(false)
+  enableEventReminder     Boolean  @default(true)
+  eventReminderMinutes    Int      @default(10)
+  eventReminderTitle      String   @default("{{title}}")
+  eventReminderBody       String   @default("{{time}} · {{location}}\n{{task}}\n{{tips}}")
+  enableTaskReminder      Boolean  @default(true)
+  taskReminderMinutes     Int      @default(30)
+  taskReminderTitle       String   @default("{{title}}")
+  taskReminderBody        String   @default("截止：{{time}}\n{{description}}")
   defaultPhase            Phase?   @relation(fields: [defaultPhaseId],references: [id],onDelete: SetNull)
   activeStyle             Style?   @relation(fields: [activeStyleId],references: [id],onDelete: SetNull)
 }

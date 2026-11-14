@@ -15,9 +15,6 @@ export const ConfigModel = {
       secret: t.String(),
     }),
 
-    features: t.Object({
-      enableReminder: t.Boolean(),
-    }),
   }),
 
   publicConfig: t.Object({
@@ -31,9 +28,6 @@ export const ConfigModel = {
       expiresIn: t.String(),
     }),
 
-    features: t.Object({
-      enableReminder: t.Boolean(),
-    }),
   }),
 
   newConfig: t.Partial(
@@ -49,9 +43,6 @@ export const ConfigModel = {
         expiresIn: t.String(),
       })),
 
-      features: t.Partial(t.Object({
-        enableReminder: t.Boolean(),
-      })),
     }),
   ),
 } as const

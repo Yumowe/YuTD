@@ -1,5 +1,5 @@
-import { ANALYSIS_MAX_SIZE, analyzePixelsV2 } from './anav2'
-import type { AnaV2Options, ColorAnalysis } from './anav2'
+import { ANALYSIS_MAX_SIZE, analyzePixels } from './ana'
+import type { AnaOptions, ColorAnalysis } from './types'
 
 export function createColorPixels(analysis: ColorAnalysis) {
   const { palette, labels, alpha } = analysis
@@ -13,7 +13,7 @@ export function createColorPixels(analysis: ColorAnalysis) {
   return { pixels, labels }
 }
 
-export async function analyzeImage(image: HTMLImageElement, options: AnaV2Options = {}): Promise<ColorAnalysis> {
+export async function analyzeImage(image: HTMLImageElement, options: AnaOptions = {}): Promise<ColorAnalysis> {
   const scale = Math.min(1, ANALYSIS_MAX_SIZE / Math.max(image.naturalWidth, image.naturalHeight))
   const width = Math.max(1, Math.round(image.naturalWidth * scale))
   const height = Math.max(1, Math.round(image.naturalHeight * scale))
@@ -25,5 +25,5 @@ export async function analyzeImage(image: HTMLImageElement, options: AnaV2Option
   context.drawImage(image, 0, 0, width, height)
   const pixels = context.getImageData(0, 0, width, height).data
   canvas.width = canvas.height = 0
-  return analyzePixelsV2(pixels, width, height, options)
+  return analyzePixels(pixels, width, height, options)
 }

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 const { errors, dismissError, clearErrors } = useAppErrors()
-const expanded = ref(true)
+
 const count = computed(() => errors.value.reduce((total, error) => total + error.count, 0))
+
+const expanded = ref(true)
 
 watch(() => [errors.value.at(-1)?.id ?? 0, count.value] as const, ([id, value], [previousId, previous]) => {
   if (id > previousId || value > previous)

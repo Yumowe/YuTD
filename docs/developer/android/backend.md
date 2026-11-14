@@ -93,9 +93,9 @@ Entity 描述一张表，DAO 声明 SQL 查询和插入更新方法，Room 在�
 
 数据库位于应用私有目录 `databases/yutd.db`，原图和简化图位于 `files/images/`，上传临时文件位于 `cache/image-uploads/`。覆盖安装通常保留这些数据，清除应用数据或卸载会移除本地数据。
 
-Room 当前结构版本为 `2`，已有 `1 → 2` 自动迁移，结构记录保存在 `app/schemas/`。增加表或修改字段需要考虑迁移；仅移动 Kotlin 源文件位置不需要增加数据库版本。
+Room 当前结构版本基线为 `1`，结构记录保存在 `app/schemas/`。目前尚无用户，新库直接创建最终结构，不保留历史迁移；正式发布后的结构修改再增加迁移。仅移动 Kotlin 源文件位置不影响数据库结构版本。
 
-本地配置中的 `system.host` / `system.port` 为兼容字段，不会开启监听端口；提醒功能开关也不代表已实现 Android 系统通知调度。
+本地配置中的 `system.host` / `system.port` 为兼容字段，不会开启监听端口。提醒偏好统一保存到 preferences；当前 Room 结构基线为 1，任务提醒保存为 UTC 毫秒整数，接口返回 ISO 日期时间。`getReminderData` 提供经过鉴权的完整数据快照；通知计划与系统调度由前端的 Capacitor Local Notifications 插件负责，Kotlin 不调度通知。详见 Android README 的提醒章节。
 
 ## 构建
 

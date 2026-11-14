@@ -7,7 +7,7 @@ import androidx.room.*
 @Entity(tableName = "data_version")
 data class DataVersionRecord(
     @PrimaryKey val id: Int = 1,
-    val version: Long = 0,
+    val version: Long = 1,
     @ColumnInfo(defaultValue = "'1970-01-01T00:00:00.000Z'") val updatedAt: String = Instant.now().toString(),
 )
 

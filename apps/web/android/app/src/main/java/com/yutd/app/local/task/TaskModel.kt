@@ -24,7 +24,7 @@ data class TaskRecord(
 @Entity(tableName = "task_reminders", foreignKeys = [ForeignKey(entity = TaskRecord::class,
     parentColumns = ["id"], childColumns = ["taskId"], onDelete = ForeignKey.CASCADE)],
     indices = [Index(value = ["taskId", "time"], unique = true), Index("time")])
-data class ReminderRecord(@PrimaryKey(autoGenerate = true) val id: Long = 0, val taskId: Long, val time: String)
+data class ReminderRecord(@PrimaryKey(autoGenerate = true) val id: Long = 0, val taskId: Long, val time: Long)
 
 @Entity(tableName = "task_tags", foreignKeys = [ForeignKey(entity = TaskRecord::class,
     parentColumns = ["id"], childColumns = ["taskId"], onDelete = ForeignKey.CASCADE)],
@@ -42,6 +42,7 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id") suspend fun task(id: Long): TaskRecord?
     @Insert suspend fun insertTask(value: TaskRecord): Long
     @Update suspend fun saveTask(value: TaskRecord)
+    @Query("DELETE FROM tasks WHERE id = :id") suspend fun deleteTask(id: Long)
     @Query("SELECT * FROM task_reminders WHERE taskId = :id ORDER BY time, id") suspend fun reminders(id: Long): List<ReminderRecord>
     @Query("DELETE FROM task_reminders WHERE taskId = :id") suspend fun clearReminders(id: Long)
     @Insert suspend fun insertReminder(value: ReminderRecord): Long

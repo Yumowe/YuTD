@@ -1,108 +1,97 @@
 <script setup lang="ts">
 import Card from '~/components/preview/card/Card.vue'
-import { CardStyleKey } from '~/components/preview/card/cardMaterial'
 import AppPopup from '~/components/common/AppPopup.vue'
+import { CardStyleKey } from '~/components/preview/card/cardMaterial'
 import { BackgroundContextKey } from '~/components/image/background'
+
+export type ChangeTask = (id: number, change: Pick<NonNullable<Parameters<ReturnType<Api['api']['task']>['patch']>[0]>, 'status' | 'isDone'>
+  | Parameters<ReturnType<Api['api']['task']>['postpone']['patch']>[0]) => Promise<ApiData<Api['api']['task']['post']>>
 
 // 类型
 type Task = ApiData<Api['api']['task']['get']>[number]
+
 export type TaskBlockData = Pick<Task, 'id' | 'phaseId' | 'title' | 'description' | 'priority' | 'status' | 'completed' | 'completedAt' | 'plannedDate' | 'dueDate'> & {
   event: Pick<NonNullable<Task['event']>, 'name' | 'color'> | null
-  tags: { name: string }[]
-  tips: { id: number, content: string }[]
+  tags: Pick<Task['tags'][number], 'name'>[]
+  tips: Pick<Task['tips'][number], 'id' | 'content'>[]
 }
-type TaskChange = { id: number, status: Task['status'], isDone: boolean } | { id: number, plannedDate: string }
+
 // 组件逻辑
 const props = withDefaults(defineProps<{
+  /** 写入任务状态或延期变更。 */
+  changeTask?: ChangeTask
+  /** 任务内容与关联数据。 */
   task: TaskBlockData
   detail?: 0 | 1 | 2 | 3 // 0 预览，1 完成操作，2 延期和放弃操作，3 完整文字详情。
+  /** 卡片或横向排列。 */
   variant?: 'card' | 'row'
+  /** 当前查看的日期。 */
   attentionDate?: string
+  /** 覆盖默认的中心辉光颜色。 */
   centerGlowColor?: string
+  /** 是否正在调整位置或尺寸。 */
   moving?: boolean
+  /** 需要标记的计划或截止逾期类型。 */
   overdue?: 'due' | 'plan'
+  /** 是否允许任务操作。 */
   interactive?: boolean
+  /** 是否显示编辑入口。 */
   editable?: boolean
 }>(), { detail: 0, variant: 'card', interactive: true, editable: false })
+
 const emit = defineEmits<{
   change: [taskId: number]
   edit: [taskId: number]
   detail: [taskId: number]
 }>()
+
 const { mode } = useSystemStatus()
+
 // 系统依赖
 
 const { now, timeZone } = useSystemTime()
+
 const { reportError } = useAppErrors()
+
 // Task 状态
 const pendingTasks = useState<Record<number, boolean>>('tasks:completion-pending', () => ({}))
+
 const previousStatuses = useState<Record<number, 'TODO' | 'DOING'>>('tasks:previous-statuses', () => ({}))
-// API 逻辑
-const taskApiClient = useApi({
-  key: () => `tasks:${props.task.phaseId}:all`,
-  read: api => api.api.task.get({ query: { phaseId: props.task.phaseId } }),
-  write: (api, change: TaskChange) => 'plannedDate' in change
-    ? api.api.task({ id: change.id }).postpone.patch({ plannedDate: change.plannedDate })
-    : api.api.task({ id: change.id }).patch({ isDone: change.isDone, status: change.status })
-})
-const taskApi = taskApiClient
-const taskApiState = useAsyncData(taskApiClient.key, taskApiClient.read, { deep: true, immediate: false })
-const currentTask = computed(() => props.interactive ? taskApiState.data.value?.find(task => task.id === props.task.id) ?? props.task : props.task)
+
+const currentTask = computed(() => props.task)
+
 const completed = computed(() => currentTask.value.completed || currentTask.value.status === 'DONE' || currentTask.value.status === 'CANCELLED')
+
 const pending = computed(() => Boolean(pendingTasks.value[props.task.id]))
+
 const timestamp = (value: Task['plannedDate']) => value ? new Date(value).getTime() : NaN
+
 const canPostpone = computed(() => props.detail >= 2 && !completed.value && !(timestamp(currentTask.value.dueDate) <= (now.value?.getTime() ?? Date.now())))
+
 const canCancel = computed(() => props.detail >= 2 && !completed.value)
+
 const completionTitle = computed(() => currentTask.value.completedAt
   ? `${currentTask.value.status === 'CANCELLED' ? '放弃' : '完成'}时间：${calendarDate(currentTask.value.completedAt, timeZone.value)} ${Object.values(clockParts(currentTask.value.completedAt, timeZone.value)).map(part => String(part).padStart(2, '0')).join(':')}`
   : '')
-const deferOpen = ref(false)
-const deferDate = ref('')
-const deferError = ref('')
-
-async function saveChange(change: TaskChange) {
-  if (!props.interactive || props.detail === 0 || pending.value) return
-  const id = currentTask.value.id
-  pendingTasks.value[id] = true
-  try {
-    const saved = await taskApi.write(change).catch(() => undefined)
-    await taskApiState.refresh()
-    if (saved) emit('change', saved.id)
-    return saved
-  } finally {
-    Reflect.deleteProperty(pendingTasks.value, id)
-  }
-}
-
-async function toggleCompleted() {
-  if (!props.interactive || props.detail === 0 || pending.value) return
-  const id = currentTask.value.id
-  const next = !completed.value
-  if (next) previousStatuses.value[id] = currentTask.value.status === 'DOING' ? 'DOING' : 'TODO'
-  await saveChange({ id, isDone: next, status: next ? 'DONE' : previousStatuses.value[id] ?? 'TODO' })
-}
-
-async function cancelTask() {
-  if (!canCancel.value || pending.value) return
-  const id = currentTask.value.id
-  previousStatuses.value[id] = currentTask.value.status === 'DOING' ? 'DOING' : 'TODO'
-  await saveChange({ id, status: 'CANCELLED', isDone: false })
-}
 
 function localDateTime(date: Date) {
   const parts = clockParts(date, timeZone.value)
   const clock = [parts.hour, parts.minute, parts.second].map(part => String(part).padStart(2, '0')).join(':')
   return `${calendarDate(date, timeZone.value)}T${clock}`
 }
+
 const deferMinimum = computed(() => localDateTime(new Date((now.value?.getTime() ?? Date.now()) + 1000)))
+
 const deferMaximum = computed(() => {
   const due = currentTask.value.dueDate
   return due ? localDateTime(new Date(timestamp(due) - 1)) : undefined
 })
+
 function canDefer(date: Date) {
   const due = currentTask.value.dueDate
   return Number.isFinite(date.getTime()) && date.getTime() > (now.value?.getTime() ?? Date.now()) && (!due || date.getTime() < timestamp(due))
 }
+
 const deferPresets = computed(() => {
   const current = now.value ?? new Date()
   const local = localDateTime(current)
@@ -118,49 +107,6 @@ const deferPresets = computed(() => {
   return presets.map(preset => ({ ...preset, disabled: !canDefer(preset.date) }))
 })
 
-function openDefer() {
-  if (!canPostpone.value || pending.value) return
-  deferOpen.value = true
-  deferError.value = ''
-  const first = deferPresets.value.find(preset => !preset.disabled)
-  const due = timestamp(currentTask.value.dueDate)
-  deferDate.value = first ? localDateTime(first.date) : Number.isFinite(due) ? localDateTime(new Date(due - 1)) : ''
-}
-
-function closeDefer() {
-  deferOpen.value = false
-}
-
-async function saveDefer() {
-  if (!deferOpen.value || pending.value) return
-  let date: Date
-  try {
-    if (!deferDate.value) throw new Error('请选择延期时间')
-    date = parseZonedDateTime(deferDate.value, timeZone.value)
-    if (!canPostpone.value || !canDefer(date)) throw new Error('延期时间必须晚于当前时间，并早于截止时间')
-  } catch (error) {
-    deferError.value = error instanceof Error ? error.message : '延期时间无效'
-    reportError(deferError.value, '延期任务')
-    return
-  }
-  const saved = await saveChange({ id: currentTask.value.id, plannedDate: date.toISOString() })
-  if (saved) closeDefer()
-  else deferError.value = '延期未保存，请检查截止时间后重试'
-}
-
-watch([() => props.task.id, timeZone, completed], closeDefer)
-watch(() => props.detail, (detail) => {
-  if (detail < 2) closeDefer()
-})
-const block = ref<HTMLElement | null>(null)
-const background = inject(BackgroundContextKey, null)
-const cardStyle = inject(CardStyleKey, null)
-const simpleMaterial = computed(() => !background || cardStyle?.value.showMode === 0)
-const glass = ref<InstanceType<typeof Card> | null>(null)
-const glassColors = shallowRef<{ textColor: string | null, tone: 'dark' | 'light' | null } | null>(null)
-const size = shallowRef({ width: 0, height: 0 })
-let observer: ResizeObserver | undefined
-
 const taskDates = computed(() => {
   const dates = [
     { kind: 'plan' as const, value: currentTask.value.plannedDate, label: '计划时间' },
@@ -169,7 +115,9 @@ const taskDates = computed(() => {
   return dates.filter(date => Number.isFinite(timestamp(date.value)))
     .sort((a, b) => timestamp(a.value) - timestamp(b.value))
 })
+
 const currentDay = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
+
 const timing = computed(() => {
   const plan = taskDates.value.find(date => date.kind === 'plan')
   const due = taskDates.value.find(date => date.kind === 'due')
@@ -189,7 +137,9 @@ const timing = computed(() => {
     && currentDay.value === calendarDate(due.value!, timeZone.value)
   return { date, glow: both ? 'both' : date?.kind ?? null }
 })
+
 const planExpired = computed(() => !completed.value && timestamp(currentTask.value.plannedDate) < (now.value?.getTime() ?? Date.now()))
+
 const displayDates = computed(() => {
   const plan = taskDates.value.find(date => date.kind === 'plan')
   const due = taskDates.value.find(date => date.kind === 'due')
@@ -199,22 +149,54 @@ const displayDates = computed(() => {
   const onDay = taskDates.value.filter(date => day && calendarDate(date.value!, timeZone.value) === day)
   return onDay.length ? onDay : plan ? [plan] : due ? [due] : []
 })
-const hasDateArea = computed(() => displayDates.value.length > 0 || planExpired.value)
+
 function dateLabel(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
   return date.kind === 'plan'
     ? '计划截止'
     : !completed.value && timestamp(date.value) < (now.value?.getTime() ?? Date.now()) ? '截止逾期' : '截止时间'
 }
-const centerGlowColor = computed(() => props.centerGlowColor ?? (timing.value.glow === 'plan' ? 'rgb(59 130 246 / .22)' : timing.value.glow ? 'rgb(239 68 68 / .22)' : 'rgb(255 255 255 / .10)'))
+
 function dateTitle(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
   const parts = clockParts(date.value!, timeZone.value)
   return `${dateLabel(date)}：${calendarDate(date.value!, timeZone.value)} ${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
 }
+
 function isDisplayDay(date: { value: Task['plannedDate'] }) {
   return calendarDate(date.value!, timeZone.value) === (props.attentionDate ?? currentDay.value)
 }
+
 const eventName = computed(() => currentTask.value.event?.name.trim() ?? '')
+
 const tips = computed(() => currentTask.value.tips.filter(tip => tip.content.trim()))
+
+const statusText = computed(() => ({ TODO: '待办', DOING: '进行中', DONE: '已完成', CANCELLED: '已取消' })[currentTask.value.status])
+
+const deferOpen = ref(false)
+
+const deferDate = ref('')
+
+const deferError = ref('')
+
+const block = ref<HTMLElement | null>(null)
+
+const background = inject(BackgroundContextKey, null)
+
+const cardStyle = inject(CardStyleKey, null)
+
+const simpleMaterial = computed(() => !background || cardStyle?.value.showMode === 0)
+
+const glass = ref<InstanceType<typeof Card> | null>(null)
+
+const glassColors = shallowRef<{ textColor: string | null, tone: 'dark' | 'light' | null } | null>(null)
+
+const size = shallowRef({ width: 0, height: 0 })
+
+let observer: ResizeObserver | undefined
+
+const hasDateArea = computed(() => displayDates.value.length > 0 || planExpired.value)
+
+const centerGlowColor = computed(() => props.centerGlowColor ?? (timing.value.glow === 'plan' ? 'rgb(59 130 246 / .22)' : timing.value.glow ? 'rgb(239 68 68 / .22)' : 'rgb(255 255 255 / .10)'))
+
 const layout = computed(() => {
   const { width, height } = size.value
   if (props.variant === 'row') {
@@ -243,8 +225,9 @@ const layout = computed(() => {
     : 0
   return { compact, fontSize, titleLines, tipCount, tipLines }
 })
+
 const visibleTips = computed(() => props.variant === 'row' ? [] : props.detail === 3 ? tips.value : tips.value.slice(0, layout.value.tipCount))
-const statusText = computed(() => ({ TODO: '待办', DOING: '进行中', DONE: '已完成', CANCELLED: '已取消' })[currentTask.value.status])
+
 const blockStyle = computed(() => ({
   '--task-row-action-size': `${Math.max(12, Math.min(26, size.value.height * 0.55))}px`,
   '--task-row-bottom-space': hasDateArea.value ? displayDates.value.length > 1 ? '34px' : '20px' : '4px',
@@ -260,6 +243,12 @@ const blockStyle = computed(() => ({
   '--task-glow': timing.value.glow === 'plan' ? '#3b82f6' : timing.value.glow ? '#ef4444' : 'var(--text-secondary)'
 }))
 
+watch([() => props.task.id, timeZone, completed], closeDefer)
+
+watch(() => props.detail, (detail) => {
+  if (detail < 2) closeDefer()
+})
+
 onMounted(() => {
   if (!block.value)
     return
@@ -274,6 +263,63 @@ onBeforeUnmount(() => {
   observer?.disconnect()
   closeDefer()
 })
+
+async function saveChange(change: Parameters<ChangeTask>[1]) {
+  if (!props.interactive || props.detail === 0 || pending.value) return
+  const id = currentTask.value.id
+  pendingTasks.value[id] = true
+  try {
+    const saved = await props.changeTask?.(id, change).catch(() => undefined)
+    if (saved) emit('change', saved.id)
+    return saved
+  } finally {
+    Reflect.deleteProperty(pendingTasks.value, id)
+  }
+}
+
+async function toggleCompleted() {
+  if (!props.interactive || props.detail === 0 || pending.value) return
+  const id = currentTask.value.id
+  const next = !completed.value
+  if (next) previousStatuses.value[id] = currentTask.value.status === 'DOING' ? 'DOING' : 'TODO'
+  await saveChange({ isDone: next, status: next ? 'DONE' : previousStatuses.value[id] ?? 'TODO' })
+}
+
+async function cancelTask() {
+  if (!canCancel.value || pending.value) return
+  previousStatuses.value[currentTask.value.id] = currentTask.value.status === 'DOING' ? 'DOING' : 'TODO'
+  await saveChange({ status: 'CANCELLED', isDone: false })
+}
+
+function openDefer() {
+  if (!canPostpone.value || pending.value) return
+  deferOpen.value = true
+  deferError.value = ''
+  const first = deferPresets.value.find(preset => !preset.disabled)
+  const due = timestamp(currentTask.value.dueDate)
+  deferDate.value = first ? localDateTime(first.date) : Number.isFinite(due) ? localDateTime(new Date(due - 1)) : ''
+}
+
+function closeDefer() {
+  deferOpen.value = false
+}
+
+async function saveDefer() {
+  if (!deferOpen.value || pending.value) return
+  let date: Date
+  try {
+    if (!deferDate.value) throw new Error('请选择延期时间')
+    date = parseZonedDateTime(deferDate.value, timeZone.value)
+    if (!canPostpone.value || !canDefer(date)) throw new Error('延期时间必须晚于当前时间，并早于截止时间')
+  } catch (error) {
+    deferError.value = error instanceof Error ? error.message : '延期时间无效'
+    reportError(deferError.value, '延期任务')
+    return
+  }
+  const saved = await saveChange({ plannedDate: date.toISOString() })
+  if (saved) closeDefer()
+  else deferError.value = '延期未保存，请检查截止时间后重试'
+}
 
 defineExpose({ updateRect: () => glass.value?.updateRect() })
 </script>

@@ -62,7 +62,7 @@ export abstract class EventService {
         ...event,
         schedules: scheduleData?.length ? { create: scheduleData } : undefined,
       },
-      include: { phase: true, schedules: true },
+      include: { phase: true, schedules: true, tips: true, _count: { select: { tasks: true } } },
     })
   }
 
@@ -72,7 +72,7 @@ export abstract class EventService {
       throw new NotFoundException('事件不存在')
     if (typeof data.phaseId === 'number')
       await ensurePhase(data.phaseId)
-    return prisma.event.update({ where: { id }, data, include: { phase: true, schedules: true , tips: true } })
+    return prisma.event.update({ where: { id }, data, include: { phase: true, schedules: true, tips: true, _count: { select: { tasks: true } } } })
   }
 
   static async delete(id: number) {

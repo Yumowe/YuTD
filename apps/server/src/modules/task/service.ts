@@ -31,8 +31,8 @@ function parseDateTime(value: string, field: string, timeZone: string) {
   }
 }
 
-function normalizeReminderTimes(values: string[], timeZone: string) {
-  return [...new Set(values.map(value => parseDateTime(value, '提醒时间', timeZone).toISOString()))]
+function normalizeReminderTimes(values: Date[]) {
+  return [...new Set(values.map(value => value.getTime()))]
     .map(time => ({ time: new Date(time) }))
 }
 
@@ -62,7 +62,7 @@ async function toPrismaData(data: TaskModelType['update'], replaceCollections = 
     reminders: reminderTimes
       ? {
           ...(replaceCollections ? { deleteMany: {} } : {}),
-          create: normalizeReminderTimes(reminderTimes, timeZone),
+          create: normalizeReminderTimes(reminderTimes),
         }
       : undefined,
     tags: tags
@@ -97,6 +97,15 @@ export const taskInclude = {
 
 
 export abstract class TaskService {
+  static delete(id: number) {
+    return prisma.$transaction(async (tx) => {
+      const task = await tx.task.findUnique({ where: { id }, include: taskInclude })
+      if (!task) throw new NotFoundException('找不到这个任务喵！')
+      await tx.task.delete({ where: { id } })
+      return { ...task, isDone: task.completed }
+    })
+  }
+
   private static async attention(
     filters: TaskModelType['dailyAttention'] | TaskModelType['weeklyAttention'],
     weekly: boolean,

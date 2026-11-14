@@ -71,10 +71,14 @@ export abstract class ImageBackgroundService {
     return record ? selection(record) : { backgroundKey, id: null, position: null }
   }
 
-  static bind(backgroundKey: string, imageId: string, position?: ImagePosition) {
+  static bind(backgroundKey: string, imageId: string | null, position?: ImagePosition) {
     if (position && (position.x + position.width > position.originalWidth || position.y + position.height > position.originalHeight))
       throw new BadRequestException('背景裁剪区域超出图片范围')
     return serial(() => prisma.$transaction(async (tx) => {
+      if (imageId === null) {
+        await tx.imageBackground.deleteMany({ where: { backgroundKey } })
+        return { backgroundKey, id: null, position: null }
+      }
       if (!await tx.image.findUnique({ where: { id: imageId }, select: { id: true } }))
         throw new NotFoundException('图片不存在')
       const record = await tx.imageBackground.upsert({

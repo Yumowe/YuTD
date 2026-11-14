@@ -33,6 +33,14 @@ export interface NativeCapabilities {
 export interface NativeBridge {
   getCapabilities(): Promise<NativeCapabilities>
   getPreferences(): Promise<LocalPreferences>
+  openAutoStartSettings(): Promise<{ target: 'autostart' | 'application' }>
+  getReminderData(options: { authToken?: string | null }): Promise<{
+    preferences: LocalPreferences
+    phases: Result<Routes['phase']['get']>
+    events: Result<Routes['event']['get']>
+    tasks: Result<Routes['task']['get']>
+    tips: Result<Routes['tip']['get']>
+  }>
   updatePreferences(options: { data: Partial<LocalPreferences>, replace?: boolean }): Promise<LocalPreferences>
   resetPreferences(): Promise<LocalPreferences>
   getDataVersion(): Promise<{ version: string }>
@@ -57,6 +65,7 @@ export interface NativeBridge {
   listTasks(options: { query?: Record<string, unknown> }): Promise<{ items: Result<Routes['task']['get']> }>
   createTask(options: { data: Body<Routes['task']['post']> }): Promise<Result<Routes['task']['post']>>
   updateTask(options: { id: number, data: Body<Task['patch']> }): Promise<Result<Task['patch']>>
+  deleteTask(options: { id: number }): Promise<Result<Task['delete']>>
   postponeTask(options: { id: number, data: Body<Task['postpone']['patch']> }): Promise<Result<Task['postpone']['patch']>>
   dailyTasks(options: { query?: Record<string, unknown> }): Promise<Result<Routes['dailytask']['get']>>
   weeklyTasks(options: { query?: Record<string, unknown> }): Promise<Result<Routes['weeklytask']['get']>>
@@ -142,6 +151,7 @@ export function createNativeApi(bridge: NativeBridge) {
   }), { get: async (options?: NativeOptions) => (await bridge.listSchedules({ query: options?.query })).items, post: (data: Body<Routes['event-schedule']['post']>) => bridge.createSchedule({ data }) })
   const task = resource('id', (id: number) => ({
     patch: (data: Body<Task['patch']>) => bridge.updateTask({ id, data }),
+    delete: () => bridge.deleteTask({ id }),
     postpone: { patch: (data: Body<Task['postpone']['patch']>) => bridge.postponeTask({ id, data }) }
   }), { get: async (options?: NativeOptions) => (await bridge.listTasks({ query: options?.query })).items, post: (data: Body<Routes['task']['post']>) => bridge.createTask({ data }) })
   const tip = resource('id', (id: number) => ({
@@ -255,6 +265,9 @@ export function createNativeFetcher(bridge: NativeBridge | null): typeof fetch {
         ? handler(nativeOptions)
         : handler(request.body === null ? undefined : await body(), nativeOptions))
       request.signal.throwIfAborted()
+      if (!['GET', 'HEAD'].includes(method) && /^\/api\/(preferences|phase|event|event-schedule|task|tip)(?:\/|$)/.test(path)) {
+        window.dispatchEvent(new Event('yutd:reminders-changed'))
+      }
       if (data instanceof Response) return data
       const status = routeMember(handler, 'status')
       return Response.json({ code: 0, message: 'ok', data }, { status: typeof status === 'number' ? status : 200 })

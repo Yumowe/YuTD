@@ -19,14 +19,13 @@ class ConfigService internal constructor(private val database: LocalDatabase) {
         return value
     }
     private fun publicConfig(value: JSONObject) = obj("system" to value.getJSONObject("system"),
-        "auth" to value.getJSONObject("auth").let { obj("enabled" to it.getBoolean("enabled"), "expiresIn" to it.getString("expiresIn")) },
-        "features" to value.getJSONObject("features"))
+        "auth" to value.getJSONObject("auth").let { obj("enabled" to it.getBoolean("enabled"), "expiresIn" to it.getString("expiresIn")) })
 
     suspend fun get(): JSObject = database.read { publicConfig(initialize()) }
     suspend fun update(data: JSONObject): JSObject = database.write {
-        data.checked(setOf("system", "auth", "features"))
+        data.checked(setOf("system", "auth"))
         val current = initialize()
-        for ((key, allowed) in mapOf("system" to setOf("host", "port"), "auth" to setOf("enabled", "password", "expiresIn"), "features" to setOf("enableReminder"))) {
+        for ((key, allowed) in mapOf("system" to setOf("host", "port"), "auth" to setOf("enabled", "password", "expiresIn"))) {
             if (!data.has(key)) continue
             val patch = data.opt(key) as? JSONObject ?: throw LocalApiException("$key 必须是对象")
             patch.checked(allowed)
@@ -52,7 +51,6 @@ class ConfigService internal constructor(private val database: LocalDatabase) {
                     if (target.getBoolean("enabled") && target.getString("passwordHash").isEmpty()) throw LocalApiException("启用本地登录前请先设置密码")
                     database.auth.clearSessions()
                 }
-                else -> if (patch.has("enableReminder")) target.put("enableReminder", patch.flag("enableReminder"))
             }
         }
         dao.saveConfig(ConfigRecord(json = current.toString()))

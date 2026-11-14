@@ -1,4 +1,4 @@
-import { Elysia } from 'elysia'
+import { Elysia, t } from 'elysia'
 import { TaskModel } from './model'
 import { TaskService } from './service'
 
@@ -18,4 +18,7 @@ export const taskRoutes = new Elysia({ prefix: '/api' })
   })
   .patch('/task/:id', ({ params, body }) => TaskService.update(Number(params.id), body), {
     body: TaskModel.update,
+  })
+  .delete('/task/:id', ({ params }) => TaskService.delete(params.id), {
+    params: t.Object({ id: t.Numeric({ minimum: 1, multipleOf: 1 }) }),
   })

@@ -6,6 +6,7 @@ const props = withDefaults(defineProps<{
   variant?: 'file' | 'thumbnail'
   fit?: 'cover' | 'contain'
 }>(), { variant: 'thumbnail', fit: 'cover' })
+const emit = defineEmits<{ deleted: [] }>()
 const root = ref<HTMLElement | null>(null)
 const url = ref('')
 const failed = ref(false)
@@ -15,6 +16,7 @@ let visible = false
 let disposed = false
 const client = useApi({
   key: () => `image:${props.image.id}:${props.variant}`,
+  write: api => api.api.image({ id: props.image.id }).delete(),
   read: async (api) => {
     const signal = request?.signal
     const response = await api.api.image({ id: props.image.id })[props.variant].get({ fetch: { signal } })
@@ -62,18 +64,27 @@ onBeforeUnmount(() => {
   request?.abort()
   if (url.value) URL.revokeObjectURL(url.value)
 })
+
+defineExpose({
+  saving: client.write.saving,
+  async remove() {
+    await client.write()
+    emit('deleted')
+  }
+})
 </script>
 
 <template>
   <div
     ref="root"
     class="stored-image-preview"
+    :class="{ 'stored-image-preview--file': variant === 'file' }"
   >
     <img
       v-if="url"
       :src="url"
       :alt="image.name"
-      :style="{ objectFit: fit }"
+      :style="{ objectFit: variant === 'file' ? 'contain' : fit }"
     >
     <span
       v-else
@@ -91,5 +102,7 @@ onBeforeUnmount(() => {
 <style scoped>
 .stored-image-preview { position: relative; display: grid; place-items: center; width: 100%; height: 100%; min-height: 120px; overflow: hidden; background: var(--background-primary); }
 .stored-image-preview img { display: block; width: 100%; height: 100%; }
+.stored-image-preview--file { grid-template: minmax(0, 1fr) / minmax(0, 1fr); min-width: 0; min-height: 0; }
+.stored-image-preview--file img { min-width: 0; min-height: 0; }
 .stored-image-preview span { display: grid; justify-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
 </style>

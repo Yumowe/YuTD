@@ -5,28 +5,43 @@ import TaskEditPopup from './TaskEditPopup.vue'
 import type { EditableTask } from './TaskEdit.vue'
 import { calendarDate, calendarDayNumber } from '~/utils/date'
 
-const props = defineProps<{ eventId?: number, phaseId?: number, weekCount?: number, open: boolean }>()
-const emit = defineEmits<{ 'update:open': [open: boolean], 'saved': [event: EditableEvent], 'task-saved': [task: EditableTask] }>()
-const editor = ref<InstanceType<typeof EventEdit> | null>(null)
-const taskPopup = ref<InstanceType<typeof TaskEditPopup> | null>(null)
-const taskEvent = shallowRef<EditableEvent | null>(null)
-watch(() => props.eventId, () => {
-  taskEvent.value = null
-})
+const props = defineProps<{
+  /** 课程及排课数据。 */
+  events: ApiData<Api['api']['event']['get']> | undefined
+  /** 课程数据是否正在读取。 */
+  eventsPending: boolean
+  /** 重新读取课程数据。 */
+  refreshEvents: () => Promise<unknown>
+  /** 已有事件 ID；为空时新建。 */
+  eventId?: number
+  /** 所属阶段 ID。 */
+  phaseId?: number
+  /** 阶段总周数。 */
+  weekCount?: number
+  /** 是否打开弹窗。 */
+  open: boolean
+}>()
+
+const emit = defineEmits<{
+  'update:open': [open: boolean]
+  'saved': [event: EditableEvent]
+  'task-saved': [task: EditableTask]
+  'deleted': [eventId: EditableEvent['id']]
+  'task-deleted': [taskId: EditableTask['id']]
+}>()
+
 const { mode } = useSystemStatus()
-const client = useApi({
-  key: () => `event:${props.eventId ?? `new:${props.phaseId}`}`,
-  read: async api => props.eventId === undefined ? null : api.api.event({ id: props.eventId }).get()
-})
-const { data: fetchedEvent, pending, error, refresh } = useAsyncData(client.key, client.read, { deep: true, immediate: props.eventId !== undefined })
-const event = shallowRef<(EditableEvent & { phase?: { startDate: Date, endDate: Date } }) | null>(fetchedEvent.value ?? null)
+
+const fetchedEvent = computed(() => props.events?.find(value => value.id === props.eventId) ?? null)
+
+const pending = computed(() => props.eventsPending)
+
+const error = computed(() => (!props.eventsPending && props.events === undefined))
+
+const event = shallowRef<EditableEvent | null>(fetchedEvent.value ?? null)
+
 const editorPhaseId = computed(() => event.value?.phaseId ?? props.phaseId ?? 0)
-// 刷新失败时保留已打开的编辑器及其中尚未保存的草稿。
-watch([() => props.eventId, fetchedEvent], ([id, value]) => {
-  if (id === undefined) return
-  if (event.value?.id !== id) event.value = null
-  if (value?.id === id) event.value = value
-}, { immediate: true })
+
 const weekCount = computed(() => {
   const phase = event.value?.phase
   if (!phase) return props.weekCount ?? 0
@@ -34,19 +49,57 @@ const weekCount = computed(() => {
     - calendarDayNumber(calendarDate(phase.startDate, 'UTC'))) / 7) + 1
 })
 
+const editorRef = ref<InstanceType<typeof EventEdit> | null>(null)
+
+const taskPopup = ref<InstanceType<typeof TaskEditPopup> | null>(null)
+
+const taskEvent = shallowRef<EditableEvent | null>(null)
+
+watch(() => props.eventId, () => {
+  taskEvent.value = null
+})
+
+watch([() => props.open, () => props.eventId], ([open, id], previous) => {
+  if (open && id === undefined && (!previous || !previous[0] || previous[1] !== id)) {
+    event.value = null
+    taskEvent.value = null
+  }
+}, { immediate: true })
+
+// 刷新失败时保留已打开的编辑器及其中尚未保存的草稿。
+watch([() => props.eventId, fetchedEvent], ([id, value]) => {
+  if (id === undefined) return
+  if (event.value?.id !== id) event.value = null
+  if (value?.id === id) event.value = value
+}, { immediate: true })
+
 watch(mode, (value) => {
   if (value !== 'edit') emit('update:open', false)
 })
+
+const refresh = () => props.refreshEvents()
 
 function saved(value: EditableEvent) {
   if (props.eventId === undefined) event.value = value
   emit('saved', value)
   if (props.eventId !== undefined) void refresh()
 }
+
 function taskSaved(task: EditableTask) {
   emit('task-saved', task)
-  const keys = Object.keys(useNuxtApp().payload.data).filter(key => key.startsWith('taskAttention:') || key.startsWith('tasks:'))
-  void refreshNuxtData(keys)
+  void props.refreshEvents()
+}
+
+function deleted(id: EditableEvent['id']) {
+  event.value = null
+  taskEvent.value = null
+  emit('deleted', id)
+  emit('update:open', false)
+}
+
+function taskDeleted(id: EditableTask['id']) {
+  emit('task-deleted', id)
+  void props.refreshEvents().catch(() => {})
 }
 </script>
 
@@ -58,7 +111,7 @@ function taskSaved(task: EditableTask) {
     class="event-edit-popup"
     :class="{ 'event-edit-popup--paired': Boolean(taskEvent) }"
     :close-on-outside="false"
-    :dismissible="!editor?.saving && !taskPopup?.saving"
+    :dismissible="!editorRef?.saving && !taskPopup?.saving"
     @update:open="emit('update:open', $event)"
   >
     <p
@@ -90,12 +143,13 @@ function taskSaved(task: EditableTask) {
     </p>
     <EventEdit
       v-if="editorPhaseId > 0 && (event || eventId === undefined)"
-      ref="editor"
+      ref="editorRef"
       :event="event"
       :phase-id="editorPhaseId"
       :week-count="weekCount"
       :allow-new="false"
       @saved="saved"
+      @deleted="deleted"
       @add-task="taskEvent = $event"
     />
     <template
@@ -105,6 +159,9 @@ function taskSaved(task: EditableTask) {
       <TaskEditPopup
         ref="taskPopup"
         :key="taskEvent.id"
+        :events="props.events"
+        :events-pending="props.eventsPending"
+        :refresh-events="props.refreshEvents"
         :open="true"
         mode="panel"
         :editing="true"
@@ -112,6 +169,7 @@ function taskSaved(task: EditableTask) {
         :event-id="taskEvent.id"
         @update:open="!$event && (taskEvent = null)"
         @saved="taskSaved"
+        @deleted="taskDeleted"
       />
     </template>
   </AppPopup>

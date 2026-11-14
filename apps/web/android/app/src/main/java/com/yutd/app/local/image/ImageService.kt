@@ -197,6 +197,10 @@ class ImageService internal constructor(context: Context, private val database: 
     suspend fun bind(data: JSONObject): JSObject = mutex.withLock { database.write {
         data.checked(setOf("backgroundKey", "imageId", "position"), setOf("backgroundKey", "imageId"))
         val key = backgroundKey(data.text("backgroundKey", trim = false))
+        if (data.isNull("imageId")) {
+            dao.deleteBackground(key)
+            return@write obj("backgroundKey" to key, "id" to null, "position" to null)
+        }
         val id = image(data.text("imageId")).id
         val position = if (data.has("position")) {
             val value = data.opt("position") as? JSONObject ?: throw LocalApiException("裁剪参数必须是对象")

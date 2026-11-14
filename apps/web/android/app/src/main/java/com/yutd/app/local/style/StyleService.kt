@@ -40,6 +40,6 @@ class StyleService internal constructor(private val database: LocalDatabase) {
         backgroundSecondary = data.color("backgroundSecondary", current.backgroundSecondary),
         textPrimary = data.color("textPrimary", current.textPrimary),
         textSecondary = data.color("textSecondary", current.textSecondary),
-        fontFamily = data.boundedText("fontFamily", current.fontFamily, 200),
+        fontFamily = "system-ui",
     )
 }

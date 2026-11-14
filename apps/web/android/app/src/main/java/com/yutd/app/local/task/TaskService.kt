@@ -21,11 +21,18 @@ class TaskService internal constructor(private val database: LocalDatabase) {
     internal suspend fun calendarForPhase(id: Long): List<CalendarRecord> = dao.phaseCalendar(id)
     internal suspend fun saveCalendar(value: CalendarRecord) = dao.saveCalendar(value)
 
+    suspend fun delete(id: Long): JSObject = database.write {
+        val value = data(require(id))
+        database.tips.unlinkTarget("tasks", id.toString())
+        dao.deleteTask(id)
+        value
+    }
+
     internal suspend fun data(value: TaskRecord): JSObject = value.toJson().apply {
         put("isDone", value.completed)
         put("phase", database.phases.require(value.phaseId).toJson())
         put("event", value.eventId?.let { database.events.require(it).toJson() } ?: JSONObject.NULL)
-        put("reminders", arr(dao.reminders(value.id).map { obj("id" to it.id, "taskId" to it.taskId, "time" to it.time) }))
+        put("reminders", arr(dao.reminders(value.id).map { obj("id" to it.id, "taskId" to it.taskId, "time" to iso(Instant.ofEpochMilli(it.time))) }))
         put("tags", arr(dao.tags().filter { it.taskId == value.id }.map { obj("id" to it.id, "taskId" to it.taskId, "name" to it.name) }))
         put("tips", arr(database.tips.linkedTo("tasks", value.id.toString()).map { it.toJson() }))
     }
@@ -75,7 +82,7 @@ class TaskService internal constructor(private val database: LocalDatabase) {
             estimatedTime = current?.estimatedTime, actualTime = current?.actualTime, createdAt = current?.createdAt ?: now(), updatedAt = now())
         if (id == null) value = value.copy(id = dao.insertTask(value)) else dao.saveTask(value)
         if (data.has("reminderTimes")) {
-            val times = data.strings("reminderTimes").map { iso(dateTime(it, timeZone)) }.distinct()
+            val times = data.strings("reminderTimes").map { dateTime(it, timeZone).toEpochMilli() }.distinct()
             dao.clearReminders(value.id)
             times.forEach { dao.insertReminder(ReminderRecord(taskId = value.id, time = it)) }
         }

@@ -2,6 +2,9 @@ package com.yutd.app.local
 
 import android.content.Context
 import androidx.room.*
+import androidx.sqlite.db.SupportSQLiteDatabase
+import org.json.JSONArray
+import java.time.Instant
 import com.yutd.app.local.utils.LocalApiException
 import com.yutd.app.local.phase.*
 import com.yutd.app.local.event.*
@@ -21,8 +24,7 @@ import com.yutd.app.local.resource.*
         PhaseRecord::class, EventRecord::class, ScheduleRecord::class, TaskRecord::class,
         ReminderRecord::class, TagRecord::class, TipRecord::class, TipLink::class, CalendarRecord::class,
         ImageRecord::class, BackgroundRecord::class, ConfigRecord::class, SessionRecord::class],
-    version = 2,
-    autoMigrations = [AutoMigration(from = 1, to = 2)],
+    version = 1,
     exportSchema = true,
 )
 abstract class LocalDatabase : RoomDatabase() {
@@ -103,10 +105,29 @@ abstract class LocalDatabase : RoomDatabase() {
 
         @Volatile private var instance: LocalDatabase? = null
 
+        private fun seedStylePresets(database: SupportSQLiteDatabase, context: Context) {
+            val presets = JSONArray(context.assets.open("style-presets.json").bufferedReader().use { it.readText() })
+            val now = Instant.now().toString()
+            for (index in 0 until presets.length()) {
+                val preset = presets.getJSONObject(index)
+                database.execSQL(
+                    """INSERT INTO styles (name, showMode, backgroundPrimary, backgroundSecondary, textPrimary, textSecondary, fontFamily, createdAt, updatedAt)
+                       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM styles WHERE name = ?)""",
+                    arrayOf<Any>(preset.getString("name"), 0, preset.getString("backgroundPrimary"),
+                        preset.getString("backgroundSecondary"), preset.getString("textPrimary"), preset.getString("textSecondary"),
+                        "system-ui", now, now, preset.getString("name")),
+                )
+            }
+        }
+
         fun get(context: Context): LocalDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(
                 context.applicationContext, LocalDatabase::class.java, "yutd.db",
-            ).build().also {
+            ).addCallback(object : Callback() {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    seedStylePresets(db, context.applicationContext)
+                }
+            }).build().also {
                 it.applicationContext = context.applicationContext
                 instance = it
             }
