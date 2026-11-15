@@ -17,8 +17,6 @@ const props = defineProps<{
   eventsPending?: boolean
   /** 重新读取课程数据。 */
   refreshEvents?: () => Promise<unknown>
-  /** 重新读取页面相关数据。 */
-  refreshContent?: () => Promise<unknown>
 }>()
 
 const { now, timeZone } = useSystemTime()
@@ -213,12 +211,11 @@ watch(mode, (value) => {
       />
     </button>
     <PhaseEdit
-      v-if="mode === 'edit' && refreshEvents && refreshContent && eventsPending !== undefined"
+      v-if="mode === 'edit' && refreshEvents && eventsPending !== undefined"
       v-model:open="createMenuOpen"
       :events="props.events"
       :events-pending="props.eventsPending"
       :refresh-events="refreshEvents"
-      :refresh-content="refreshContent"
       :phases="phases"
       :anchor="addAnchor"
       :phase-id="preferences?.defaultPhaseId"

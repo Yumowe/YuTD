@@ -9,8 +9,7 @@ function createAppStyle() {
   const records = useState<Record<number, { saved: Style, draft: Style }>>('app:styles', () => ({}))
   const styleId = computed(() => preferences.value?.activeStyleId ?? null)
   const client = useApi({
-    key: () => `style:${styleId.value ?? 'none'}`,
-    read: async api => styleId.value === null ? null : api.api.style({ id: styleId.value }).get(),
+    key: 'styles:all',
     write: (api, value: Style) => {
       const { id, ...fields } = value
       if (!fields.name || !fields.fontFamily) throw new Error('预设名称和字体名称不能为空。')
@@ -18,7 +17,7 @@ function createAppStyle() {
     }
   })
   const presetsClient = useApi({
-    key: 'styles',
+    key: 'styles:all',
     read: api => api.api.style.get(),
     write: (api, value: Parameters<Api['api']['style']['post']>[0]) => {
       if (!value.name || !value.fontFamily) throw new Error('预设名称和字体名称不能为空。')
@@ -41,17 +40,14 @@ function createAppStyle() {
     }
   }
 
-  async function loadActive() {
-    const id = styleId.value
-    if (id === null) return
-    const value = await client.read()
-    if (value?.id === id) remember(value)
-  }
+  watch(presetsClient.data, (values) => {
+    values?.forEach(remember)
+  }, { immediate: true })
 
   async function initialize() {
     if (initialized) return
     initialized = true
-    await Promise.all([loadActive(), presetsClient.read()])
+    await presetsClient.read()
   }
 
   function styleData(name = style.value?.name) {
@@ -72,7 +68,6 @@ function createAppStyle() {
       record.saved = { ...saved }
       record.draft = { ...saved, ...changes }
     }
-    await presetsClient.read().catch(() => {})
     return saved
   }
 
@@ -88,28 +83,21 @@ function createAppStyle() {
     const created = await presetsClient.write(fields)
     remember(created)
     if (preferences.value) preferences.value.activeStyleId = created.id
-    await presetsClient.read().catch(() => {})
     return created
   }
-
-  watch(styleId, () => {
-    if (initialized) void loadActive().catch(() => {})
-  })
 
   return {
     style,
     styles: presetsClient.data,
     dirty,
-    loading: client.read.loading,
+    loading: presetsClient.read.loading,
     saving: client.write.saving,
     creating: presetsClient.write.saving,
     initialize,
     save,
     undo,
     create,
-    async refresh() {
-      await Promise.all([loadActive(), presetsClient.read()])
-    }
+    refresh: presetsClient.read.refresh
   }
 }
 

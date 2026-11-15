@@ -33,6 +33,8 @@ apps/web/
 
 ## 数据请求入口
 
+完整调用规则、动态 key、`watch`、版本缓存和写入通知见 [API 请求、缓存与写入通知](./api)。
+
 ```text
 页面 / 组件
   → composables/useApi/
@@ -65,22 +67,22 @@ client.write.saving.value // 是否仍有写入在进行
 await client.read() // 先检查服务器版本，版本一致时复用缓存，变化时重新读取
 ```
 
-loading、saving 属于当前 `useApi` 实例，成功或失败后都会复位；并发时等待该类请求全部结束才变为 `false`。页面重读、保存后的更新和切回页面时均直接调用 `read()`，通过服务器版本判断是否重新请求数据，不强制跳过缓存。`read.refresh()` 保留为显式强制读取能力。
+loading、saving 属于当前 `useApi` 实例，成功或失败后都会复位；并发时等待该类请求全部结束才变为 `false`。写入成功后由 `useApi` 通知同大类及关联大类重新调用普通 `read()`，业务层无需在保存后手动刷新。页面重读和切回页面时也调用 `read()`，通过服务器版本判断是否重新请求数据。`read.refresh()` 保留为显式强制读取能力。
 
 需要首次读取和 key 变化时自动重读，可设置 `watch: true`：
 
 ```ts
 const client = useApi({
-  key: () => `phase:${preferences.value?.defaultPhaseId ?? 'none'}`,
+  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}`,
   read: async (api) => {
-    const id = preferences.value?.defaultPhaseId
-    return id == null ? null : api.api.phase({ id }).get()
+    const phaseId = preferences.value?.defaultPhaseId
+    return phaseId == null ? [] : api.api.task.get({ query: { phaseId } })
   },
   watch: true
 })
 ```
 
-监听封装在 `useApi` 内部，页面只使用 `client.data` 与 `client.read.loading`，无须再写 watch。手动 `read()`、`read.refresh()` 仍可调用；自动读取失败由 `useApi` 统一上报。未设置 `watch` 时保持手动读取行为，页面不再额外包装 `useAsyncData`；仅配置写入方法时不启动自动读取。
+监听封装在 `useApi` 内部，页面只使用 `client.data` 与 `client.read.loading`，无须再写 watch。手动 `read()`、`read.refresh()` 仍可调用；自动读取失败由 `useApi` 统一上报。未设置 `watch` 时不进行首次读取和 key 变化后的自动读取，但配置了 `read` 的实例仍会响应写入通知。仅配置写入方法时不创建读取订阅。
 
 完整偏好通过 `useAppPeferences()` 获取：
 
@@ -94,7 +96,7 @@ onMounted(() => {
 
 初始化只在 `app.vue` 挂载后调用（登录页跳过），通过 `useApi.read()` 将完整偏好存入全局 `preferences`。同一应用的调用共用一份客户端与监听，loading、saving 直接引用 `useApi` 的 `read.loading` 和 `write.saving`，不另行维护计数。初始化读取不会触发保存；之后直接修改 `preferences.value` 中的字段，深度监听会通过 `useApi.write()` 自动保存。各组件无需单独读取或写入偏好。
 
-前端修改立即生效，保存按修改顺序执行，后端响应不回填覆盖前端新值；失败由 `useApi` 上报并保留前端状态，后续修改仍可继续保存。阶段详情的请求、加载状态和刷新由页面负责。
+前端修改立即生效，保存按修改顺序执行，后端响应不回填覆盖前端新值；失败由 `useApi` 上报并保留前端状态，后续修改仍可继续保存。当前阶段由页面从共享的 `phases:all` 列表中选择，加载状态沿用阶段列表客户端。
 
 未接入业务的 IndexedDB 缓存工具已归档至 `app/deprecated/useIndexedDB/`，不再参与 composables 自动导入。目前 `useApi` 只使用内存缓存，没有前端持久缓存或远程同步。`useApiMode()` 中的 `local`、`remote`、`remote-local` 仍是预留模式，没有完整的模式切换实现。
 

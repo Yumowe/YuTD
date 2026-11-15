@@ -10,7 +10,7 @@ const emit = defineEmits<{ submitted: [], uploaded: [image: StoredImage] }>()
 const { reportError } = useAppErrors()
 const colors = ref<number | 'auto'>('auto')
 const client = useApi({
-  key: 'image:upload',
+  key: 'images:all',
   write: async (api, task: { image: Promise<Blob>, name: string, colors: number | 'auto' }) => {
     const blob = await task.image
     const file = new File([blob], task.name, { type: blob.type })

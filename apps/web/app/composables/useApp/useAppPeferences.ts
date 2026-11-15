@@ -7,7 +7,7 @@ const appPreferences = new WeakMap<ReturnType<typeof useNuxtApp>, ReturnType<typ
 function createAppPeferences() {
   const preferences = useState<Preferences | null>('app:preferences', () => null)
   const client = useApi({
-    key: 'preferences',
+    key: 'preferences:current',
     read: api => api.api.preferences.get(),
     write: (api, value: Preferences) => api.api.preferences.put(value)
   })

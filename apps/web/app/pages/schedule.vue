@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 导入
 import type AppSidebar from '~/components/common/AppSidebar.vue'
-import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import EditPopup from '~/components/edit/EditPopup.vue'
 import type { EditField, EditValues } from '~/utils/editFields'
 
@@ -14,16 +13,8 @@ const { mode } = useSystemStatus()
 const { preferences, loading: preferencesLoading } = useAppPeferences()
 
 // API 读取
-const phaseClient = reactive(useApi({
-  key: () => `phase:${preferences.value?.defaultPhaseId ?? 'none'}`,
-  read: async (api) => {
-    const id = preferences.value?.defaultPhaseId
-    return id == null ? null : api.api.phase({ id }).get()
-  },
-  watch: true
-}))
 const phasesClient = reactive(useApi({
-  key: 'phases',
+  key: 'phases:all',
   read: api => api.api.phase.get(),
   watch: true
 }))
@@ -36,14 +27,11 @@ const eventsClient = reactive(useApi({
   watch: true
 }))
 const tasksClient = reactive(useApi({
-  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}:all`,
+  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}`,
   read: async (api) => {
     const phaseId = preferences.value?.defaultPhaseId
     return phaseId == null ? [] : api.api.task.get({ query: { phaseId } })
   },
-  write: (api, [id, change]: Parameters<ChangeTask>) => 'plannedDate' in change
-    ? api.api.task({ id }).postpone.patch(change)
-    : api.api.task({ id }).patch(change),
   watch: true
 }))
 
@@ -62,9 +50,9 @@ const editAnchor = ref<HTMLElement | null>(null)
 
 // 计算属性
 const phases = computed(() => phasesClient.data)
-const phase = computed(() => phaseClient.data)
+const phase = computed(() => phases.value?.find(phase => phase.id === selectedPhaseId.value) ?? null)
 const selectedPhaseId = computed(() => preferences.value?.defaultPhaseId ?? null)
-const loading = computed(() => preferencesLoading.value || phaseClient.read.loading.value)
+const loading = computed(() => preferencesLoading.value || phasesClient.read.loading.value)
 const savedSettings = computed<ScheduleSettings>(() => ({
   maxFocusScale: preferences.value?.maxFocusScale ?? 2,
   focusColumnScale: preferences.value?.focusColumnScale ?? 3,
@@ -89,15 +77,8 @@ async function refreshContent() {
   await Promise.all([
     phasesClient.read(),
     eventsClient.read(),
-    tasksClient.read(),
-    phaseClient.read()
+    tasksClient.read()
   ])
-}
-
-async function changeTask(...args: Parameters<ChangeTask>) {
-  const task = await tasksClient.write(args)
-  await refreshContent()
-  return task
 }
 
 // 监听
@@ -108,7 +89,7 @@ watch(() => state.editOpen, (open) => {
   if (!open) state.preview = null
 }, { flush: 'sync' })
 watchEffect(() => {
-  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read, refreshContent })
+  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read })
 })
 
 // 生命周期
@@ -165,11 +146,8 @@ onDeactivated(() => {
       :events="eventsClient.data"
       :tasks="tasksClient.data"
       :events-pending="eventsClient.read.loading.value"
-      :refresh-events="eventsClient.read"
-      :refresh-content="refreshContent"
-      :change-task="changeTask"
       :phase="phase"
-      v-bind="tableSettings"
+      :edge-pixels="tableSettings.edgePixels"
       mode="full"
     />
     <div
@@ -180,7 +158,7 @@ onDeactivated(() => {
       <button
         class="button"
         type="button"
-        @click="phaseClient.read()"
+        @click="phasesClient.read()"
       >
         重新加载
       </button>

@@ -368,8 +368,6 @@ const scheduleBlocks = computed(() => schedules.value.map((schedule) => {
     :event-id="editingEventId"
     :open="true"
     @update:open="!$event && (editingEventId = null)"
-    @saved="refresh()"
-    @task-saved="refreshTasks()"
   />
 </template>
 

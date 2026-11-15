@@ -23,7 +23,7 @@ const limit = 24
 
 // API 读取
 const phasesClient = reactive(useApi({
-  key: 'phases',
+  key: 'phases:all',
   read: api => api.api.phase.get(),
   watch: true
 }))
@@ -93,10 +93,9 @@ async function removeImage() {
   await imagePreview.value.remove().catch(() => {})
 }
 
-async function imageDeleted() {
+function imageDeleted() {
   state.deleteCandidate = false
   state.previewOpen = false
-  await resourcesClient.read()
 }
 
 async function copyId() {
@@ -129,7 +128,7 @@ watch(data, (value) => {
     changePage(Math.max(1, Math.ceil(value.total / limit)))
 })
 watchEffect(() => {
-  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read, refreshContent })
+  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read })
 })
 
 // 生命周期
@@ -172,7 +171,6 @@ onBeforeUnmount(() => {
         </div>
         <ImageUploader
           v-if="criteria.type === 'all' || criteria.type === 'image'"
-          @uploaded="resourcesClient.read()"
         />
       </header>
     </PageCard>

@@ -14,14 +14,14 @@ const { now, timeZone } = useSystemTime()
 const form = reactive({ name: '', startDate: '', endDate: '' })
 
 const client = reactive(useApi({
-  key: 'phase:save',
+  key: 'phases:all',
   write: (api, data: Parameters<Api['api']['phase']['post']>[0]) => props.phase
     ? api.api.phase({ id: props.phase.id }).patch(data)
     : api.api.phase.post(data)
 }))
 
 const deleteClient = reactive(useApi({
-  key: 'phase:delete',
+  key: 'phases:all',
   write: (api, id: Phase['id']) => api.api.phase({ id }).delete()
 }))
 

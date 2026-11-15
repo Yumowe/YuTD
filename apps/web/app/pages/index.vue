@@ -12,16 +12,8 @@ const { now, timeZone } = useSystemTime()
 const { preferences, loading: preferencesLoading } = useAppPeferences()
 
 // API 读取
-const phaseClient = reactive(useApi({
-  key: () => `phase:${preferences.value?.defaultPhaseId ?? 'none'}`,
-  read: async (api) => {
-    const id = preferences.value?.defaultPhaseId
-    return id == null ? null : api.api.phase({ id }).get()
-  },
-  watch: true
-}))
 const phasesClient = reactive(useApi({
-  key: 'phases',
+  key: 'phases:all',
   read: api => api.api.phase.get(),
   watch: true
 }))
@@ -34,7 +26,7 @@ const eventsClient = reactive(useApi({
   watch: true
 }))
 const tasksClient = reactive(useApi({
-  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}:all`,
+  key: () => `tasks:${preferences.value?.defaultPhaseId ?? 'none'}`,
   read: async (api) => {
     const phaseId = preferences.value?.defaultPhaseId
     return phaseId == null ? [] : api.api.task.get({ query: { phaseId } })
@@ -45,7 +37,7 @@ const tasksClient = reactive(useApi({
   watch: true
 }))
 const dailyTipsClient = reactive(useApi({
-  key: () => `dailytips:v2:${preferences.value?.defaultPhaseId ?? 'all'}:${now.value ? calendarDate(now.value, timeZone.value) : 'pending'}:${timeZone.value}`,
+  key: () => `tips:daily-tips:${preferences.value?.defaultPhaseId ?? 'none'}:${now.value ? calendarDate(now.value, timeZone.value) : 'pending'}:${timeZone.value}`,
   read: async (api) => {
     const phase = preferences.value?.defaultPhaseId
     const date = now.value ? calendarDate(now.value, timeZone.value) : ''
@@ -63,9 +55,9 @@ const state = reactive({ pageActive: true })
 // 计算属性
 const tipTasks = computed(() => dailyTipsClient.data?.tasks.map(task => tasksClient.data?.find(value => value.id === task.id) ?? task))
 const phases = computed(() => phasesClient.data)
-const phase = computed(() => phaseClient.data)
+const phase = computed(() => phases.value?.find(phase => phase.id === selectedPhaseId.value) ?? null)
 const selectedPhaseId = computed(() => preferences.value?.defaultPhaseId ?? null)
-const loading = computed(() => preferencesLoading.value || phaseClient.read.loading.value)
+const loading = computed(() => preferencesLoading.value || phasesClient.read.loading.value)
 const displayedDay = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
 const displayedWeekdays = computed(() => displayedDay.value
   ? [calendarWeekday(displayedDay.value), calendarWeekday(addCalendarDays(displayedDay.value, 1))]
@@ -77,20 +69,15 @@ async function refreshContent() {
     phasesClient.read(),
     eventsClient.read(),
     tasksClient.read(),
-    phaseClient.read(),
     dailyTipsClient.read()
   ])
 }
 
-async function changeTask(...args: Parameters<ChangeTask>) {
-  const task = await tasksClient.write(args)
-  await refreshContent()
-  return task
-}
+const changeTask: ChangeTask = (...args) => tasksClient.write(args)
 
 // 监听
 watchEffect(() => {
-  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read, refreshContent })
+  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read })
 })
 
 // 生命周期
@@ -170,9 +157,6 @@ onDeactivated(() => {
           :events="eventsClient.data"
           :tasks="tasksClient.data"
           :events-pending="eventsClient.read.loading.value"
-          :refresh-events="eventsClient.read"
-          :refresh-content="refreshContent"
-          :change-task="changeTask"
           :phase="phase"
           mode="custom"
           background-key="home:schedule"
@@ -202,8 +186,6 @@ onDeactivated(() => {
           :refresh-events="eventsClient.read"
           :change-task="changeTask"
           :end-date="phase.endDate"
-          @saved="refreshContent"
-          @deleted="refreshContent"
         />
       </PageCard>
       <PageCard

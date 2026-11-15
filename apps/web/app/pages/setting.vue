@@ -16,7 +16,7 @@ const { style: draft, styles, dirty: styleDirty, loading, saving: savingStyle, c
 
 // API 读取
 const phasesClient = reactive(useApi({
-  key: 'phases',
+  key: 'phases:all',
   read: api => api.api.phase.get(),
   watch: true
 }))
@@ -212,7 +212,7 @@ watch(() => preferences.value?.timeZone, (value) => {
   state.timeZoneDraft = value ?? ''
 }, { immediate: true })
 watchEffect(() => {
-  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read, refreshContent })
+  if (state.pageActive) emit('page-data', { phases: phasesClient.data, events: eventsClient.data, eventsPending: eventsClient.read.loading.value, refreshEvents: eventsClient.read })
 })
 
 // 生命周期

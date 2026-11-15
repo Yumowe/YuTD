@@ -33,7 +33,7 @@ const controller = new AbortController()
 let restoreVersion = 0
 
 const client = useApi({
-  key: 'image:background-list',
+  key: 'images:all',
   read: async (api) => {
     const items: StoredImage[] = []
     while (true) {
@@ -44,14 +44,14 @@ const client = useApi({
   }
 })
 const backgroundClient = useApi({
-  key: () => `image:background:${props.backgroundKey ?? 'none'}`,
+  key: () => `backgrounds:${props.backgroundKey ?? 'none'}`,
   read: async api => props.backgroundKey ? api.api.image.background.get({ query: { backgroundKey: props.backgroundKey } }) : null,
   write: (api, value: { key: string, imageId: string | null, position?: ImageCropInfo }) => api.api.image.background.patch({
     backgroundKey: value.key, imageId: value.imageId, position: value.position
   })
 })
 const randomClient = useApi({
-  key: 'image:random',
+  key: 'image-rotations:draw',
   write: (api, value: { random: number, backgroundKey?: string }) => api.api.image.random({ random: String(value.random) }).get({ query: { backgroundKey: value.backgroundKey } })
 })
 
@@ -72,9 +72,9 @@ async function open() {
   await refresh()
 }
 
-function uploaded(image: StoredImage) {
-  images.value = [image, ...images.value.filter(value => value.id !== image.id)]
-}
+watch(client.data, (value) => {
+  if (value) images.value = value
+}, { immediate: true })
 
 function release(value: Omit<BackgroundSelection, 'position'> | null) {
   if (!value) return
@@ -108,16 +108,20 @@ async function choose(image: StoredImage) {
 }
 
 async function loadImage(id: string) {
-  const read = (variant: 'file' | 'thumbnail') => app.runWithContext(() => useApi({
-    key: `image:${id}:${variant}`,
-    read: async (api) => {
-      const response = await api.api.image({ id })[variant].get({ fetch: { signal: controller.signal } })
-      controller.signal.throwIfAborted()
-      const blob = await requestApiData(Promise.resolve(response))
-      if (!(blob instanceof Blob)) throw new Error('图片响应不是有效文件')
-      return blob
-    }
-  }).read())
+  const read = (variant: 'file' | 'thumbnail') => app.runWithContext(() => {
+    const scope = effectScope()
+    const request = scope.run(() => useApi({
+      key: `image-files:${id}:${variant}`,
+      read: async (api) => {
+        const response = await api.api.image({ id })[variant].get({ fetch: { signal: controller.signal } })
+        controller.signal.throwIfAborted()
+        const blob = await requestApiData(Promise.resolve(response))
+        if (!(blob instanceof Blob)) throw new Error('图片响应不是有效文件')
+        return blob
+      }
+    }).read())!
+    return request.finally(() => scope.stop())
+  })
   const files = await Promise.all([read('file'), read('thumbnail')]).catch(() => undefined)
   if (!files) return
   const [original, simplified] = files
@@ -430,7 +434,6 @@ onBeforeUnmount(() => {
     <div class="background-select__upload">
       <ImageUploader
         ref="uploader"
-        @uploaded="uploaded"
       />
     </div>
   </div>
