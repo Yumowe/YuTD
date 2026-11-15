@@ -3,17 +3,22 @@ import ImageCropper from './ImageCropper.vue'
 import AppPopup from '../common/AppPopup.vue'
 import ColorCountSelect from './ColorCountSelect.vue'
 import { simplifyImage } from '~/utils/simplifyImage'
+import type { StoredImage } from '#shared/images'
 
 defineProps<{ aspectRatio?: number }>()
-const emit = defineEmits<{ submitted: [], uploaded: [] }>()
+const emit = defineEmits<{ submitted: [], uploaded: [image: StoredImage] }>()
 const { reportError } = useAppErrors()
 const colors = ref<number | 'auto'>('auto')
 const client = useApi({
   key: 'image:upload',
-  write: async (api, task: { file: File, colors: number | 'auto' }) => api.api.image.post({
-    file: task.file,
-    thumbnail: new File([await simplifyImage(task.file, 'png', { colors: task.colors })], 'thumbnail.png', { type: 'image/png' })
-  })
+  write: async (api, task: { image: Promise<Blob>, name: string, colors: number | 'auto' }) => {
+    const blob = await task.image
+    const file = new File([blob], task.name, { type: blob.type })
+    return api.api.image.post({
+      file,
+      thumbnail: new File([await simplifyImage(file, 'png', { colors: task.colors })], 'thumbnail.png', { type: 'image/png' })
+    })
+  }
 })
 const input = ref<HTMLInputElement | null>(null)
 const source = ref('')
@@ -42,13 +47,15 @@ function selectFile(event: Event) {
   name.value = `${file.name.replace(/\.[^.]+$/, '')}.png`
 }
 
-function upload(blob: Blob) {
+function upload(image: Promise<Blob>) {
   if (!source.value) return
-  const task = { file: new File([blob], name.value, { type: blob.type }), colors: colors.value }
-  clearSource()
-  void client.write(task).then(() => {
-    if (!disposed) emit('uploaded')
-  }).catch(() => {})
+  const src = source.value
+  const task = { image, name: name.value, colors: colors.value }
+  // 原图 URL 交由后台任务持有，关闭弹窗时先不释放。
+  source.value = ''
+  void client.write(task).then((uploaded) => {
+    if (!disposed) emit('uploaded', uploaded)
+  }).catch(() => {}).finally(() => URL.revokeObjectURL(src))
   emit('submitted')
 }
 
@@ -96,6 +103,7 @@ defineExpose({ uploading, source, open: () => input.value?.click() })
       />
       <ImageCropper
         :src="source"
+        output="blob"
         :aspect-ratio="aspectRatio"
         @image="upload"
         @error="reportError($event, '裁剪图片')"

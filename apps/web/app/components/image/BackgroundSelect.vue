@@ -67,8 +67,13 @@ async function refresh() {
 }
 
 async function open() {
+  if (loading.value) return
   opened.value = true
   await refresh()
+}
+
+function uploaded(image: StoredImage) {
+  images.value = [image, ...images.value.filter(value => value.id !== image.id)]
 }
 
 function release(value: Omit<BackgroundSelection, 'position'> | null) {
@@ -203,15 +208,18 @@ async function confirm(position: ImageCropInfo) {
   const key = props.backgroundKey
   const version = ++restoreVersion
   loading.value = true
+  draft.value = null
+  opened.value = false
+  let pending: BackgroundSelection | null = value
   try {
     if (key && !await backgroundClient.write({ key, imageId: value.id, position }).catch(() => undefined)) return
     if (controller.signal.aborted || version !== restoreVersion) return
-    draft.value = null
-    opened.value = false
+    pending = null
     await applySelection(value)
   } catch (error) {
     if (!controller.signal.aborted) reportError(error, '保存背景')
   } finally {
+    release(pending)
     loading.value = false
   }
 }
@@ -313,7 +321,7 @@ onBeforeUnmount(() => {
             v-if="!draft"
             class="button image-select-button"
             type="button"
-            :disabled="loading"
+            :disabled="loading || uploader?.uploading"
             aria-label="上传图片"
             title="上传图片"
             @click="uploader?.open()"
@@ -338,21 +346,12 @@ onBeforeUnmount(() => {
       <ImageCropper
         v-if="draft"
         :src="draft.image"
+        output="info"
         :aspect-ratio="aspectRatio"
         :inert="loading"
         @info="confirm"
         @error="reportError($event, '选择背景位置')"
       />
-      <div
-        v-show="!draft"
-        class="background-select__upload"
-      >
-        <ImageUploader
-          ref="uploader"
-          @submitted="opened = false"
-          @uploaded="refresh"
-        />
-      </div>
       <template v-if="!draft">
         <p
           v-if="loading"
@@ -390,6 +389,26 @@ onBeforeUnmount(() => {
               <path d="m4.93 4.93 14.14 14.14" />
             </svg>
           </button>
+          <div
+            v-if="uploader?.uploading"
+            class="background-select__pending"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <Icon
+              name="lucide:image"
+              size="28"
+              aria-hidden="true"
+            />
+            <span class="background-select__pending-status">
+              <span
+                class="background-select__spinner"
+                aria-hidden="true"
+              />
+              图片处理中……
+            </span>
+          </div>
           <button
             v-for="image in images"
             :key="image.id"
@@ -403,11 +422,17 @@ onBeforeUnmount(() => {
             />
           </button>
         </div>
-        <p v-if="!loading && !images.length">
+        <p v-if="!loading && !images.length && !uploader?.uploading">
           暂无图片，点击右上角上传。
         </p>
       </template>
     </AppPopup>
+    <div class="background-select__upload">
+      <ImageUploader
+        ref="uploader"
+        @uploaded="uploaded"
+      />
+    </div>
   </div>
 </template>
 
@@ -431,6 +456,8 @@ onBeforeUnmount(() => {
   margin-bottom: 16px;
 }
 
+.background-select__upload { display: contents; }
+.background-select__upload :deep(.image-uploader) { display: contents; }
 .background-select__upload :deep(.image-uploader > button) {
   display: none;
 }
@@ -441,13 +468,21 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.background-select__gallery > button {
+.background-select__gallery > button,
+.background-select__pending {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--border-color);
   border-radius: 8px;
   background: transparent;
-  cursor: pointer;
 }
+.background-select__gallery > button { cursor: pointer; }
 .background-select__gallery > .background-select__none { display: grid; place-items: center; min-height: 120px; color: var(--text-secondary); background: var(--background-primary); }
+.background-select__pending { display: grid; place-content: center; justify-items: center; gap: 12px; min-height: 120px; color: var(--text-secondary); background: var(--background-primary); font-size: 12px; }
+.background-select__pending-status { display: flex; align-items: center; gap: 6px; }
+.background-select__spinner { width: 12px; height: 12px; border: 2px solid var(--border-color); border-top-color: currentColor; border-radius: 50%; animation: image-upload-spin 0.8s linear infinite; }
+@keyframes image-upload-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .background-select__spinner { animation: none; }
+}
 </style>
