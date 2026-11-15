@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { CropImageReply, CropImageRequest } from './crop.worker'
+
 export interface ImageCropInfo {
   originalWidth: number
   originalHeight: number
@@ -10,10 +12,11 @@ export interface ImageCropInfo {
 
 const props = defineProps<{
   src: string
+  output: 'info' | 'blob'
   aspectRatio?: number
 }>()
 const emit = defineEmits<{
-  image: [image: Blob]
+  image: [image: Promise<Blob>]
   info: [info: ImageCropInfo]
   error: [error: unknown]
 }>()
@@ -35,7 +38,6 @@ const frameStyle = computed(() => ({
   width: `${crop.value.width / original.value.width * 100}%`,
   height: `${crop.value.height / original.value.height * 100}%`
 }))
-let revision = 0 // 用户选择的图片版本号，防止异步操作返回时已经切换到新图片
 let drag: {
   pointerId: number
   mode: 'move' | 'resize'
@@ -47,14 +49,12 @@ let drag: {
 } | null = null
 
 watch(() => props.src, () => {
-  revision++
   drag = null
   original.value = { width: 0, height: 0 }
   exporting.value = false
 }, { immediate: true, flush: 'sync' })
 
 onBeforeUnmount(() => {
-  revision++
   drag = null
 })
 
@@ -139,29 +139,38 @@ function arrowMove(event: KeyboardEvent) {
   move(crop.value.x + direction[0]! * step, crop.value.y + direction[1]! * step)
 }
 
-async function outputImage() {
+function outputImage() {
   if (!ready.value || exporting.value || !image.value) return
-  const current = revision
   const selected = { ...info.value }
   exporting.value = true
-  try {
-    const canvas = document.createElement('canvas')
-    canvas.width = selected.width
-    canvas.height = selected.height
-    const context = canvas.getContext('2d')
-    if (!context) throw new Error('当前浏览器无法创建裁剪画布')
-    context.drawImage(image.value, selected.x, selected.y, selected.width, selected.height, 0, 0, selected.width, selected.height)
-    const blob = await new Promise<Blob>((resolve, reject) => {
-      canvas.toBlob(value => value ? resolve(value) : reject(new Error('生成裁剪图片失败')), 'image/png')
-    })
-    if (current !== revision) return
-    emit('image', blob)
+  if (props.output === 'info') {
     emit('info', selected)
-  } catch (error) {
-    if (current === revision) emit('error', error)
-  } finally {
-    if (current === revision) exporting.value = false
+    return
   }
+  // 已提交的任务交给调用方持有，关闭裁剪弹窗不会取消后台导出。
+  const src = props.src
+  emit('image', new Promise<Blob>((resolve, reject) => {
+    const worker = new Worker(new URL('./crop.worker.ts', import.meta.url), { type: 'module' })
+    const fail = (error: unknown) => {
+      worker.terminate()
+      reject(error)
+    }
+    worker.onmessage = ({ data }: MessageEvent<CropImageReply>) => {
+      worker.terminate()
+      if ('error' in data) reject(new Error(data.error))
+      else resolve(data.blob)
+    }
+    worker.onerror = (event) => {
+      event.preventDefault()
+      fail(new Error(event.message || '图片裁剪线程运行失败'))
+    }
+    worker.onmessageerror = () => fail(new Error('无法读取图片裁剪结果'))
+    try {
+      worker.postMessage({ src, ...selected } satisfies CropImageRequest)
+    } catch (error) {
+      fail(error)
+    }
+  }))
 }
 </script>
 
