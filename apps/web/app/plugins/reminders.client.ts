@@ -13,7 +13,7 @@ export default defineNuxtPlugin({
     const status = useState('reminders:permission', () => ({ display: '', exact: '' }))
     if (Capacitor.getPlatform() !== 'android' || !$native) return
     const authToken = useCookie<string | null>('yutd-auth-token')
-    const client = reactive(useApi({ key: 'reminders:data', read: () => $native.getReminderData({ authToken: authToken.value }) }))
+    const client = reactive(useApi({ key: 'reminders:all', read: () => $native.getReminderData({ authToken: authToken.value }) }))
     let running = false
     let dirty = false
     let disposed = false

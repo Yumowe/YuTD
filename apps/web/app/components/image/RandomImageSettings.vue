@@ -11,11 +11,14 @@ const loading = ref(true)
 const saving = ref<'save' | 'shuffle' | null>(null)
 const failed = ref(false)
 const client = useApi({
-  key: 'image:random-settings',
+  key: 'image-rotations:all',
   read: api => api.api.image.random.get(),
   write: (api, value: { images: { id: string, enabled: boolean }[], reshuffle?: boolean }) => api.api.image.random.patch(value)
 })
 const dirty = computed(() => saved.value?.items.some(item => selected.value[item.image.id] !== item.enabled) ?? false)
+watch(client.data, (value) => {
+  if (value) apply(value)
+}, { immediate: true })
 const selectedCount = computed(() => Object.values(selected.value).filter(Boolean).length)
 const filtered = computed(() => (saved.value?.items ?? []).filter(item => item.image.name.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase())))
 const pages = computed(() => Math.max(1, Math.ceil(filtered.value.length / 12)))

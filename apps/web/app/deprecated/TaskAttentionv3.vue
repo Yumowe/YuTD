@@ -405,7 +405,6 @@ onBeforeUnmount(() => {
             :center-glow-color="taskCenterGlow(item.task)"
             :detail="period === 'weekly' ? 1 : 2"
             @detail="selectedTask = item.task"
-            @change="refresh()"
             @mouseenter="emit('task-hover', item.task.id)"
             @mouseleave="emit('task-hover', null)"
           />
@@ -532,7 +531,6 @@ onBeforeUnmount(() => {
       :background="backgroundSelection"
       @update:open="!$event && (selectedTask = null)"
       @saved="emit('task-saved')"
-      @change="refresh()"
     />
   </section>
 </template>

@@ -13,8 +13,8 @@ const props = withDefaults(defineProps<{
   events: ApiData<Api['api']['event']['get']> | undefined
   /** 课程数据是否正在读取。 */
   eventsPending: boolean
-  /** 重新读取课程数据。 */
-  refreshEvents: () => Promise<unknown>
+  /** 手动重试读取课程数据。 */
+  refreshEvents?: () => Promise<unknown>
   /** 已有任务；为空时新建。 */
   task?: EditableTask | null
   /** 所属阶段 ID。 */
@@ -112,19 +112,19 @@ function taskData() {
 }
 
 const client = reactive(useApi({
-  key: 'task:save',
+  key: () => `tasks:${props.phaseId}`,
   write: (api, data: ReturnType<typeof taskData>) => activeTask.value
     ? api.api.task({ id: activeTask.value.id }).patch(data)
     : api.api.task.post({ ...data, phaseId: props.phaseId, plannedDate: data.plannedDate ?? undefined, eventId: data.eventId ?? undefined })
 }))
 
 const tipClient = reactive(useApi({
-  key: 'task:tips:save',
+  key: () => `tips:tasks:${props.phaseId}`,
   write: (api, data: Parameters<Api['api']['tip']['post']>[0]) => api.api.tip.post(data)
 }))
 
 const deleteClient = reactive(useApi({
-  key: 'task:delete',
+  key: () => `tasks:${props.phaseId}`,
   write: (api, id: EditableTask['id']) => api.api.task({ id }).delete()
 }))
 
@@ -154,7 +154,7 @@ watch([() => props.task, () => props.phaseId, () => props.eventId, () => props.d
   loadTask(task ?? null)
 }, { immediate: true })
 
-const refreshEvents = () => props.refreshEvents()
+const refreshEvents = () => props.refreshEvents?.()
 
 async function removeTask() {
   if (!activeTask.value || saving.value) return
@@ -357,6 +357,7 @@ defineExpose({ saving, focus: () => element.value?.scrollIntoView({ behavior: 's
                 role="alert"
               >
                 <span>关联事件加载失败。</span><button
+                  v-if="props.refreshEvents"
                   type="button"
                   class="button"
                   @click="refreshEvents()"

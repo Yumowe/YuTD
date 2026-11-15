@@ -6,7 +6,7 @@ import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import { BackgroundContextKey } from '~/components/image/background'
 import { GlassLayerKey } from '~/components/preview/card/glass/edges'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   /** 写入任务状态或延期变更。 */
   changeTask?: ChangeTask
   /** 任务时间线的像素位置。 */
@@ -27,7 +27,9 @@ const props = defineProps<{
   dueDate?: Date
   /** 用于详情预览的完整任务数据。 */
   task?: ApiData<Api['api']['task']['get']>[number]
-}>()
+  /** 是否允许打开任务详情，不影响标记的预渲染。 */
+  interactive?: boolean
+}>(), { interactive: true })
 
 const background = inject(BackgroundContextKey, null)
 
@@ -59,6 +61,10 @@ const anchor = ref<HTMLButtonElement | null>(null)
 
 const opened = ref(false)
 
+watch([() => props.task?.id, () => props.interactive], () => {
+  opened.value = false
+})
+
 const lineStyle = computed(() => ({
   top: `${props.top}px`
 }))
@@ -87,7 +93,7 @@ const markerStyle = computed(() => ({
       aria-haspopup="dialog"
       :title="timeText + ' ' + taskName"
       :aria-label="timeText + ' ' + taskName + '，查看任务详情'"
-      @click.stop="opened = !opened"
+      @click.stop="interactive && (opened = !opened)"
     >
       <span
         class="task-marker__triangle"

@@ -10,8 +10,8 @@ const props = defineProps<{
   events: ApiData<Api['api']['event']['get']> | undefined
   /** 课程数据是否正在读取。 */
   eventsPending: boolean
-  /** 重新读取课程数据。 */
-  refreshEvents: () => Promise<unknown>
+  /** 手动重试读取课程数据。 */
+  refreshEvents?: () => Promise<unknown>
   /** 已有事件 ID；为空时新建。 */
   eventId?: number
   /** 所属阶段 ID。 */
@@ -77,17 +77,9 @@ watch(mode, (value) => {
   if (value !== 'edit') emit('update:open', false)
 })
 
-const refresh = () => props.refreshEvents()
-
 function saved(value: EditableEvent) {
-  if (props.eventId === undefined) event.value = value
+  event.value = value
   emit('saved', value)
-  if (props.eventId !== undefined) void refresh()
-}
-
-function taskSaved(task: EditableTask) {
-  emit('task-saved', task)
-  void props.refreshEvents()
 }
 
 function deleted(id: EditableEvent['id']) {
@@ -95,11 +87,6 @@ function deleted(id: EditableEvent['id']) {
   taskEvent.value = null
   emit('deleted', id)
   emit('update:open', false)
-}
-
-function taskDeleted(id: EditableTask['id']) {
-  emit('task-deleted', id)
-  void props.refreshEvents().catch(() => {})
 }
 </script>
 
@@ -127,10 +114,11 @@ function taskDeleted(id: EditableTask['id']) {
     >
       <p>课程加载失败，请重试。</p>
       <button
+        v-if="refreshEvents"
         type="button"
         class="button"
         :disabled="pending"
-        @click="refresh()"
+        @click="refreshEvents()"
       >
         重新加载
       </button>
@@ -168,8 +156,8 @@ function taskDeleted(id: EditableTask['id']) {
         :phase-id="taskEvent.phaseId"
         :event-id="taskEvent.id"
         @update:open="!$event && (taskEvent = null)"
-        @saved="taskSaved"
-        @deleted="taskDeleted"
+        @saved="emit('task-saved', $event)"
+        @deleted="emit('task-deleted', $event)"
       />
     </template>
   </AppPopup>

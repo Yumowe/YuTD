@@ -14,9 +14,12 @@ let observer: IntersectionObserver | undefined
 let request: AbortController | undefined
 let visible = false
 let disposed = false
+const deleteClient = useApi({
+  key: 'images:all',
+  write: api => api.api.image({ id: props.image.id }).delete()
+})
 const client = useApi({
-  key: () => `image:${props.image.id}:${props.variant}`,
-  write: api => api.api.image({ id: props.image.id }).delete(),
+  key: () => `image-files:${props.image.id}:${props.variant}`,
   read: async (api) => {
     const signal = request?.signal
     const response = await api.api.image({ id: props.image.id })[props.variant].get({ fetch: { signal } })
@@ -66,9 +69,9 @@ onBeforeUnmount(() => {
 })
 
 defineExpose({
-  saving: client.write.saving,
+  saving: deleteClient.write.saving,
   async remove() {
-    await client.write()
+    await deleteClient.write()
     emit('deleted')
   }
 })

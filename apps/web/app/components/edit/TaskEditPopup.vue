@@ -11,8 +11,8 @@ const props = withDefaults(defineProps<{
   events: ApiData<Api['api']['event']['get']> | undefined
   /** 课程数据是否正在读取。 */
   eventsPending: boolean
-  /** 重新读取课程数据。 */
-  refreshEvents: () => Promise<unknown>
+  /** 手动重试读取课程数据。 */
+  refreshEvents?: () => Promise<unknown>
   /** 写入任务状态或延期变更。 */
   changeTask?: ChangeTask
   /** 是否打开弹窗。 */

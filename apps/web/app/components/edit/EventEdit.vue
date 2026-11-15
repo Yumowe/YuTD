@@ -78,26 +78,26 @@ function scheduleData() {
 }
 
 const eventClient = reactive(useApi({
-  key: 'event:save',
+  key: () => `events:${props.phaseId}`,
   write: (api, data: Parameters<Api['api']['event']['post']>[0]) => activeEvent.value
     ? api.api.event({ id: activeEvent.value.id }).patch({ name: data.name, location: data.location, organizer: data.organizer, color: data.color })
     : api.api.event.post(data)
 }))
 
 const scheduleClient = reactive(useApi({
-  key: 'event-schedule:save',
+  key: () => `events:${props.phaseId}`,
   write: (api, data: Parameters<Api['api']['event-schedule']['post']>[0]) => selectedScheduleId.value === null
     ? api.api['event-schedule'].post(data)
     : api.api['event-schedule']({ id: selectedScheduleId.value }).patch(data)
 }))
 
 const tipClient = reactive(useApi({
-  key: 'event:tips:save',
+  key: () => `tips:events:${props.phaseId}`,
   write: (api, data: Parameters<Api['api']['tip']['post']>[0]) => api.api.tip.post(data)
 }))
 
 const deleteClient = reactive(useApi({
-  key: 'event:delete',
+  key: () => `events:${props.phaseId}`,
   write: (api, id: EditableEvent['id']) => api.api.event({ id }).delete()
 }))
 

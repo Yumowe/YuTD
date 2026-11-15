@@ -484,7 +484,6 @@ onBeforeUnmount(() => {
               editable
               @edit="openTask(task, true)"
               @detail="openTask(task)"
-              @change="refresh()"
               @mouseenter="emit('task-hover', task.id)"
               @mouseleave="emit('task-hover', null)"
             />
@@ -514,7 +513,6 @@ onBeforeUnmount(() => {
               editable
               @edit="openTask(item.task, true)"
               @detail="openTask(item.task)"
-              @change="refresh()"
               @mouseenter="emit('task-hover', item.task.id)"
               @mouseleave="emit('task-hover', null)"
             />
@@ -656,7 +654,6 @@ onBeforeUnmount(() => {
       :background="backgroundSelection"
       @update:open="!$event && (selectedTask = null)"
       @saved="emit('task-saved')"
-      @change="refresh()"
     />
   </section>
 </template>

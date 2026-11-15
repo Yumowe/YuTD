@@ -17,8 +17,6 @@ const props = defineProps<{
   eventsPending: boolean
   /** 重新读取课程数据。 */
   refreshEvents: () => Promise<unknown>
-  /** 重新读取页面相关数据。 */
-  refreshContent: () => Promise<unknown>
   /** 可选择的阶段列表。 */
   phases: ApiData<Api['api']['phase']['get']> | undefined
   /** 弹层定位的锚点元素。 */
@@ -71,13 +69,8 @@ function editPhase() {
   editingPhase.value = true
 }
 
-async function phaseSaved(phase: ApiData<Api['api']['phase']['post']>) {
+function phaseSaved(phase: ApiData<Api['api']['phase']['post']>) {
   if (preferences.value) preferences.value.defaultPhaseId = phase.id
-  await props.refreshContent()
-}
-
-async function contentSaved() {
-  await props.refreshContent()
 }
 </script>
 
@@ -132,7 +125,6 @@ async function contentSaved() {
     :phase="editingPhase ? creationPhase : null"
     @update:open="!$event && (creating = null)"
     @saved="phaseSaved"
-    @deleted="contentSaved"
   />
   <EventEditPopup
     v-if="creating === 'event' && creationPhase"
@@ -143,10 +135,6 @@ async function contentSaved() {
     :phase-id="creationPhase.id"
     :week-count="creationPhase.weekCount"
     @update:open="!$event && (creating = null)"
-    @saved="contentSaved"
-    @task-saved="contentSaved"
-    @deleted="contentSaved"
-    @task-deleted="contentSaved"
   />
   <TaskEditPopup
     v-if="creating === 'task' && creationPhase"
@@ -158,8 +146,6 @@ async function contentSaved() {
     :date="creationDate"
     :editing="true"
     @update:open="!$event && (creating = null)"
-    @saved="contentSaved"
-    @deleted="contentSaved"
   />
 </template>
 
