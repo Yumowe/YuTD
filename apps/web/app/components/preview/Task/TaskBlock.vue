@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import Card from '~/components/preview/card/Card.vue'
-import AppPopup from '~/components/common/AppPopup.vue'
 import { CardStyleKey } from '~/components/preview/card/cardMaterial'
 import { BackgroundContextKey } from '~/components/image/background'
-
-export type ChangeTask = (id: number, change: Pick<NonNullable<Parameters<ReturnType<Api['api']['task']>['patch']>[0]>, 'status' | 'isDone'>
-  | Parameters<ReturnType<Api['api']['task']>['postpone']['patch']>[0]) => Promise<ApiData<Api['api']['task']['post']>>
+import TaskActions from '~/components/edit/TaskActions.vue'
+import { isTaskClosed } from '#shared/attention'
 
 // 类型
 type Task = ApiData<Api['api']['task']['get']>[number]
@@ -18,11 +16,9 @@ export type TaskBlockData = Pick<Task, 'id' | 'phaseId' | 'title' | 'description
 
 // 组件逻辑
 const props = withDefaults(defineProps<{
-  /** 写入任务状态或延期变更。 */
-  changeTask?: ChangeTask
   /** 任务内容与关联数据。 */
   task: TaskBlockData
-  detail?: 0 | 1 | 2 | 3 // 0 预览，1 完成操作，2 延期和放弃操作，3 完整文字详情。
+  detail?: 0 | 1 | 2 | 3 // 0 预览，1 完成操作，2 延期和取消操作，3 完整文字详情。
   /** 卡片或横向排列。 */
   variant?: 'card' | 'row'
   /** 当前查看的日期。 */
@@ -51,61 +47,18 @@ const { mode } = useSystemStatus()
 
 const { now, timeZone } = useSystemTime()
 
-const { reportError } = useAppErrors()
-
 // Task 状态
-const pendingTasks = useState<Record<number, boolean>>('tasks:completion-pending', () => ({}))
-
-const previousStatuses = useState<Record<number, 'TODO' | 'DOING'>>('tasks:previous-statuses', () => ({}))
-
 const currentTask = computed(() => props.task)
 
-const completed = computed(() => currentTask.value.completed || currentTask.value.status === 'DONE' || currentTask.value.status === 'CANCELLED')
+const actions = ref<InstanceType<typeof TaskActions> | null>(null)
 
-const pending = computed(() => Boolean(pendingTasks.value[props.task.id]))
-
-const timestamp = (value: Task['plannedDate']) => value ? new Date(value).getTime() : NaN
-
-const canPostpone = computed(() => props.detail >= 2 && !completed.value && !(timestamp(currentTask.value.dueDate) <= (now.value?.getTime() ?? Date.now())))
-
-const canCancel = computed(() => props.detail >= 2 && !completed.value)
+const completed = computed(() => isTaskClosed(currentTask.value))
 
 const completionTitle = computed(() => currentTask.value.completedAt
   ? `${currentTask.value.status === 'CANCELLED' ? '放弃' : '完成'}时间：${calendarDate(currentTask.value.completedAt, timeZone.value)} ${Object.values(clockParts(currentTask.value.completedAt, timeZone.value)).map(part => String(part).padStart(2, '0')).join(':')}`
   : '')
 
-function localDateTime(date: Date) {
-  const parts = clockParts(date, timeZone.value)
-  const clock = [parts.hour, parts.minute, parts.second].map(part => String(part).padStart(2, '0')).join(':')
-  return `${calendarDate(date, timeZone.value)}T${clock}`
-}
-
-const deferMinimum = computed(() => localDateTime(new Date((now.value?.getTime() ?? Date.now()) + 1000)))
-
-const deferMaximum = computed(() => {
-  const due = currentTask.value.dueDate
-  return due ? localDateTime(new Date(timestamp(due) - 1)) : undefined
-})
-
-function canDefer(date: Date) {
-  const due = currentTask.value.dueDate
-  return Number.isFinite(date.getTime()) && date.getTime() > (now.value?.getTime() ?? Date.now()) && (!due || date.getTime() < timestamp(due))
-}
-
-const deferPresets = computed(() => {
-  const current = now.value ?? new Date()
-  const local = localDateTime(current)
-  const day = calendarDate(current, timeZone.value)
-  const nextDay = (days: number) => parseZonedDateTime(`${addCalendarDays(day, days)}${local.slice(10)}`, timeZone.value, 'compatible')
-  const presets = [
-    { label: '一小时后', date: new Date(current.getTime() + 3600000) },
-    { label: '延期一天', date: nextDay(1) },
-    { label: '延期三天', date: nextDay(3) }
-  ]
-  if (currentTask.value.dueDate)
-    presets.push({ label: '截止前一小时', date: new Date(timestamp(currentTask.value.dueDate) - 3600000) })
-  return presets.map(preset => ({ ...preset, disabled: !canDefer(preset.date) }))
-})
+const timestamp = (value: Task['plannedDate']) => value ? new Date(value).getTime() : NaN
 
 const taskDates = computed(() => {
   const dates = [
@@ -114,9 +67,14 @@ const taskDates = computed(() => {
   ]
   return dates.filter(date => Number.isFinite(timestamp(date.value)))
     .sort((a, b) => timestamp(a.value) - timestamp(b.value))
+    .map(date => ({ ...date, day: calendarDate(date.value!, timeZone.value) }))
 })
 
 const currentDay = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
+
+const planExpired = computed(() => !completed.value && timestamp(currentTask.value.plannedDate) < (now.value?.getTime() ?? Date.now()))
+
+const dueExpired = computed(() => !completed.value && timestamp(currentTask.value.dueDate) < (now.value?.getTime() ?? Date.now()))
 
 const timing = computed(() => {
   const plan = taskDates.value.find(date => date.kind === 'plan')
@@ -128,32 +86,28 @@ const timing = computed(() => {
       glow: null
     }
   }
-  const time = now.value?.getTime() ?? Date.now()
-  const date = (due && timestamp(due.value) < time ? due : undefined)
-    ?? (plan && timestamp(plan.value) < time ? plan : undefined)
+  const date = (due && dueExpired.value ? due : undefined)
+    ?? (plan && planExpired.value ? plan : undefined)
     ?? taskDates.value[0] ?? null
-  const both = plan && due && timestamp(plan.value) >= time && timestamp(due.value) >= time
-    && currentDay.value === calendarDate(plan.value!, timeZone.value)
-    && currentDay.value === calendarDate(due.value!, timeZone.value)
+  const both = plan && due && !planExpired.value && !dueExpired.value
+    && currentDay.value === plan.day && currentDay.value === due.day
   return { date, glow: both ? 'both' : date?.kind ?? null }
 })
-
-const planExpired = computed(() => !completed.value && timestamp(currentTask.value.plannedDate) < (now.value?.getTime() ?? Date.now()))
 
 const displayDates = computed(() => {
   const plan = taskDates.value.find(date => date.kind === 'plan')
   const due = taskDates.value.find(date => date.kind === 'due')
   if (completed.value || planExpired.value) return due ? [due] : []
-  if (plan && due && calendarDate(plan.value!, timeZone.value) === calendarDate(due.value!, timeZone.value)) return [plan, due]
+  if (plan && due && plan.day === due.day) return [plan, due]
   const day = props.attentionDate ?? currentDay.value
-  const onDay = taskDates.value.filter(date => day && calendarDate(date.value!, timeZone.value) === day)
+  const onDay = taskDates.value.filter(date => day && date.day === day)
   return onDay.length ? onDay : plan ? [plan] : due ? [due] : []
 })
 
 function dateLabel(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
   return date.kind === 'plan'
     ? '计划截止'
-    : !completed.value && timestamp(date.value) < (now.value?.getTime() ?? Date.now()) ? '截止逾期' : '截止时间'
+    : dueExpired.value ? '截止逾期' : '截止时间'
 }
 
 function dateTitle(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
@@ -161,8 +115,8 @@ function dateTitle(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
   return `${dateLabel(date)}：${calendarDate(date.value!, timeZone.value)} ${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
 }
 
-function isDisplayDay(date: { value: Task['plannedDate'] }) {
-  return calendarDate(date.value!, timeZone.value) === (props.attentionDate ?? currentDay.value)
+function isDisplayDay(date: { day: string }) {
+  return date.day === (props.attentionDate ?? currentDay.value)
 }
 
 const eventName = computed(() => currentTask.value.event?.name.trim() ?? '')
@@ -170,12 +124,6 @@ const eventName = computed(() => currentTask.value.event?.name.trim() ?? '')
 const tips = computed(() => currentTask.value.tips.filter(tip => tip.content.trim()))
 
 const statusText = computed(() => ({ TODO: '待办', DOING: '进行中', DONE: '已完成', CANCELLED: '已取消' })[currentTask.value.status])
-
-const deferOpen = ref(false)
-
-const deferDate = ref('')
-
-const deferError = ref('')
 
 const block = ref<HTMLElement | null>(null)
 
@@ -201,27 +149,27 @@ const layout = computed(() => {
   const { width, height } = size.value
   if (props.variant === 'row') {
     const narrow = width <= 360
-    const titleHeight = height - (hasDateArea.value ? displayDates.value.length > 1 ? 40 : 28 : 8)
-    const fontSize = Math.max(10, Math.min(18, narrow ? titleHeight / 2.5 : height * 0.32))
+    const titleHeight = height - (hasDateArea.value ? displayDates.value.length > 1 ? 42 : 29 : 8)
+    const fontSize = Math.max(11, Math.min(20, narrow ? titleHeight / 2.3 : height * 0.35))
     const titleLines = narrow ? Math.max(1, Math.min(4, Math.floor(titleHeight / (fontSize * 1.25)))) : 1
     return { compact: false, fontSize, titleLines, tipCount: 0, tipLines: 0 }
   }
   const area = width * height
   const compact = width < 100 || height < 92 || area < 14000
-  const fontSize = Math.max(compact ? 8 : 12, Math.min(18, width * 0.08, height * 0.2))
-  const compactDateHeight = hasDateArea.value && height > 40 ? displayDates.value.length > 1 ? 30 : 15 : 0
+  const fontSize = Math.max(compact ? 9 : 13, Math.min(20, width * 0.09, height * 0.22))
+  const compactDateHeight = hasDateArea.value && height > 40 ? displayDates.value.length > 1 ? 32 : 16 : 0
   const titleLines = compact
     ? Math.max(1, Math.min(3, Math.floor((height - 8 - compactDateHeight) / (fontSize * 1.25))))
     : height >= 124 ? 2 : 1
   const baseHeight = 34 + fontSize * 1.25 * titleLines
-    + (eventName.value ? 17 + 6 : 0)
-    + (hasDateArea.value ? displayDates.value.length * 14 + 6 : 0)
+    + (eventName.value ? 18 + 6 : 0)
+    + (hasDateArea.value ? displayDates.value.length * 15 + 6 : 0)
   const tipHeight = height - baseHeight - 6
   const tipCount = !compact && width >= 136 && area >= 24000
-    ? Math.max(0, Math.min(tips.value.length, Math.floor((tipHeight + 4) / 36)))
+    ? Math.max(0, Math.min(tips.value.length, Math.floor((tipHeight + 4) / 38)))
     : 0
   const tipLines = tipCount
-    ? Math.min(3, Math.floor((tipHeight - (tipCount - 1) * 4) / (tipCount * 16)))
+    ? Math.min(3, Math.floor((tipHeight - (tipCount - 1) * 4) / (tipCount * 17)))
     : 0
   return { compact, fontSize, titleLines, tipCount, tipLines }
 })
@@ -230,8 +178,8 @@ const visibleTips = computed(() => props.variant === 'row' ? [] : props.detail =
 
 const blockStyle = computed(() => ({
   '--task-row-action-size': `${Math.max(12, Math.min(26, size.value.height * 0.55))}px`,
-  '--task-row-bottom-space': hasDateArea.value ? displayDates.value.length > 1 ? '34px' : '20px' : '4px',
-  '--task-action-count': 1 + Number(canPostpone.value) + Number(canCancel.value) + Number(props.editable && mode.value === 'edit'),
+  '--task-row-bottom-space': hasDateArea.value ? displayDates.value.length > 1 ? '36px' : '21px' : '4px',
+  '--task-action-count': (actions.value?.count ?? 1) + Number(props.editable && mode.value === 'edit'),
   '--event-color': currentTask.value.event?.color ?? 'var(--text-primary)',
   '--task-title-size': `${layout.value.fontSize}px`,
   '--task-title-lines': layout.value.titleLines,
@@ -242,12 +190,6 @@ const blockStyle = computed(() => ({
   '--task-readability-backdrop': simpleMaterial.value ? 'transparent' : glassColors.value?.tone === 'light' ? 'rgb(255 255 255 / .24)' : glassColors.value?.tone === 'dark' ? 'rgb(0 0 0 / .2)' : 'color-mix(in srgb, var(--background-secondary) 24%, transparent)',
   '--task-glow': timing.value.glow === 'plan' ? '#3b82f6' : timing.value.glow ? '#ef4444' : 'var(--text-secondary)'
 }))
-
-watch([() => props.task.id, timeZone, completed], closeDefer)
-
-watch(() => props.detail, (detail) => {
-  if (detail < 2) closeDefer()
-})
 
 onMounted(() => {
   if (!block.value)
@@ -261,65 +203,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   observer?.disconnect()
-  closeDefer()
 })
-
-async function saveChange(change: Parameters<ChangeTask>[1]) {
-  if (!props.interactive || props.detail === 0 || pending.value) return
-  const id = currentTask.value.id
-  pendingTasks.value[id] = true
-  try {
-    const saved = await props.changeTask?.(id, change).catch(() => undefined)
-    if (saved) emit('change', saved.id)
-    return saved
-  } finally {
-    Reflect.deleteProperty(pendingTasks.value, id)
-  }
-}
-
-async function toggleCompleted() {
-  if (!props.interactive || props.detail === 0 || pending.value) return
-  const id = currentTask.value.id
-  const next = !completed.value
-  if (next) previousStatuses.value[id] = currentTask.value.status === 'DOING' ? 'DOING' : 'TODO'
-  await saveChange({ isDone: next, status: next ? 'DONE' : previousStatuses.value[id] ?? 'TODO' })
-}
-
-async function cancelTask() {
-  if (!canCancel.value || pending.value) return
-  previousStatuses.value[currentTask.value.id] = currentTask.value.status === 'DOING' ? 'DOING' : 'TODO'
-  await saveChange({ status: 'CANCELLED', isDone: false })
-}
-
-function openDefer() {
-  if (!canPostpone.value || pending.value) return
-  deferOpen.value = true
-  deferError.value = ''
-  const first = deferPresets.value.find(preset => !preset.disabled)
-  const due = timestamp(currentTask.value.dueDate)
-  deferDate.value = first ? localDateTime(first.date) : Number.isFinite(due) ? localDateTime(new Date(due - 1)) : ''
-}
-
-function closeDefer() {
-  deferOpen.value = false
-}
-
-async function saveDefer() {
-  if (!deferOpen.value || pending.value) return
-  let date: Date
-  try {
-    if (!deferDate.value) throw new Error('请选择延期时间')
-    date = parseZonedDateTime(deferDate.value, timeZone.value)
-    if (!canPostpone.value || !canDefer(date)) throw new Error('延期时间必须晚于当前时间，并早于截止时间')
-  } catch (error) {
-    deferError.value = error instanceof Error ? error.message : '延期时间无效'
-    reportError(deferError.value, '延期任务')
-    return
-  }
-  const saved = await saveChange({ plannedDate: date.toISOString() })
-  if (saved) closeDefer()
-  else deferError.value = '延期未保存，请检查截止时间后重试'
-}
 
 defineExpose({ updateRect: () => glass.value?.updateRect() })
 </script>
@@ -486,7 +370,7 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
         v-if="editable && mode === 'edit'"
         class="task-block-action task-block-edit"
         type="button"
-        :disabled="pending"
+        :disabled="actions?.pending"
         :aria-label="`编辑任务：${currentTask.title}`"
         title="编辑任务"
         @click.stop="emit('edit', currentTask.id)"
@@ -496,114 +380,13 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
           aria-hidden="true"
         />
       </button>
-      <button
-        class="task-block-action"
-        type="button"
-        :disabled="pending"
-        :aria-pressed="completed"
-        :aria-label="`${completed ? '恢复未完成' : '标记完成'}：${currentTask.title}`"
-        :title="`${completed ? '恢复未完成' : '标记完成'}：${currentTask.title}${completed && completionTitle ? `\n${completionTitle}` : ''}`"
-        @click.stop="toggleCompleted"
-      >
-        <Icon
-          :name="currentTask.status === 'CANCELLED' ? 'lucide:x' : completed ? 'lucide:check' : 'lucide:circle'"
-          aria-hidden="true"
-        />
-      </button>
-      <button
-        v-if="canPostpone"
-        class="task-block-action"
-        type="button"
-        :disabled="pending"
-        :aria-label="`延期：${currentTask.title}`"
-        title="选择延期时间"
-        @click.stop="openDefer"
-      >
-        <Icon
-          name="lucide:calendar-clock"
-          aria-hidden="true"
-        />
-      </button>
-      <button
-        v-if="canCancel"
-        class="task-block-action"
-        type="button"
-        :disabled="pending"
-        :aria-label="`放弃：${currentTask.title}`"
-        title="放弃"
-        @click.stop="cancelTask"
-      >
-        <Icon
-          name="lucide:x"
-          aria-hidden="true"
-        />
-      </button>
+      <TaskActions
+        ref="actions"
+        :task="currentTask"
+        :extended="detail >= 2"
+        @change="emit('change', $event)"
+      />
     </div>
-    <AppPopup
-      v-if="detail >= 2 && interactive"
-      v-model:open="deferOpen"
-      class="task-block__dialog"
-      :dismissible="!pending"
-      :aria-label="`延期：${currentTask.title}`"
-    >
-      <form
-        class="task-block__defer-form"
-        @submit.prevent="saveDefer"
-      >
-        <strong>延期：{{ currentTask.title }}</strong>
-        <p class="muted">
-          {{ timeZone }} · {{ currentTask.dueDate ? '请选择截止之前的时间' : '此任务未设置截止时间' }}
-        </p>
-        <div class="task-block__presets">
-          <button
-            v-for="preset in deferPresets"
-            :key="preset.label"
-            class="button"
-            type="button"
-            :disabled="preset.disabled || pending"
-            @click="deferDate = localDateTime(preset.date); deferError = ''"
-          >
-            {{ preset.label }}
-          </button>
-        </div>
-        <label class="task-block__date-field">
-          延期至
-          <input
-            v-model="deferDate"
-            type="datetime-local"
-            step="1"
-            :min="deferMinimum"
-            :max="deferMaximum"
-            :disabled="pending"
-            required
-          >
-        </label>
-        <p
-          v-if="deferError"
-          role="alert"
-          class="task-block__defer-error"
-        >
-          {{ deferError }}
-        </p>
-        <div class="task-block__dialog-actions">
-          <button
-            class="button"
-            type="button"
-            :disabled="pending"
-            @click="closeDefer"
-          >
-            取消
-          </button>
-          <button
-            class="button"
-            type="submit"
-            :disabled="pending"
-          >
-            {{ pending ? '保存中……' : '确定延期' }}
-          </button>
-        </div>
-      </form>
-    </AppPopup>
   </div>
 </template>
 
@@ -636,7 +419,7 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
 }
 .task-block--detail .task-block-title {
   display: block;
-  font-size: 18px;
+  font-size: 20px;
 }
 .task-block--detail .task-block-tips {
   flex-shrink: 0;
@@ -648,7 +431,7 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
 .task-block-description,
 .task-block-tags {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 .task-block-description {
@@ -659,7 +442,7 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
   grid-template-columns: auto minmax(0, 1fr);
   gap: 6px 10px;
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
 }
 .task-block-dates dd {
   margin: 0;
@@ -679,6 +462,11 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
   pointer-events: none;
 }
 .task-block-actions {
+  --task-action-size: 24px;
+  --task-action-color: var(--task-glow);
+  --task-action-border: color-mix(in srgb, var(--task-glow) 50%, transparent);
+  --task-action-background: color-mix(in srgb, var(--background-secondary) 85%, transparent);
+  --task-action-active-background: var(--task-glow);
   position: absolute;
   top: 4px;
   right: 4px;
@@ -704,8 +492,8 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
   color: var(--task-glow);
   cursor: pointer;
 }
-.task-block-action[aria-pressed='true'] { color: var(--background-secondary); background: var(--task-glow); }
 .task-block-action:disabled { cursor: wait; opacity: .5; }
+.task-block--completed .task-block-actions { --task-action-opacity: .65; }
 .task-block--completed .task-block-action { opacity: .65; }
 .task-block-action:hover, .task-block-action:focus-visible { opacity: 1; }
 .task-block-content {
@@ -730,8 +518,8 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
   align-items: center;
   gap: 6px;
   width: 100%;
-  font-size: 11px;
-  line-height: 14px;
+  font-size: 12px;
+  line-height: 15px;
   text-align: center;
   color: var(--task-foreground, var(--event-color));
   margin-top: auto;
@@ -746,6 +534,7 @@ defineExpose({ updateRect: () => glass.value?.updateRect() })
 .task-block-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--task-title-lines);
   min-width: 0;
   width: 100%;
   flex-shrink: 0;
@@ -763,8 +552,8 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
   min-width: 0;
   width: 100%;
   flex-shrink: 0;
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 13px;
+  line-height: 18px;
   color: var(--task-foreground, var(--event-color));
   text-align: center;
   white-space: nowrap;
@@ -780,12 +569,13 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
   padding: 0;
   list-style: none;
   color: var(--task-foreground, var(--text-secondary));
-  font-size: 11px;
-  line-height: 16px;
+  font-size: 12px;
+  line-height: 17px;
 }
 .task-block-tips li {
   display: -webkit-box;
   -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--task-tip-lines);
   overflow: hidden;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -794,7 +584,7 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
   gap: 3px;
   padding: 26px 4px 4px;
 }
-.task-block--compact .task-block-actions { gap: 2px; }
+.task-block--compact .task-block-actions { --task-action-size: 18px; --task-action-font-size: 12px; --task-action-gap: 2px; gap: 2px; }
 .task-block--compact .task-block-action { width: 18px; height: 18px; font-size: 12px; }
 .task-block--preview .task-block-content { padding: 10px; }
 .task-block--preview.task-block--compact .task-block-content { padding: 4px; }
@@ -802,8 +592,8 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
   width: auto;
   max-width: 100%;
   margin-top: 0;
-  font-size: clamp(6px, 11cqi, 9px);
-  line-height: 12px;
+  font-size: clamp(7px, 11cqi, 10px);
+  line-height: 13px;
 }
 @container task (max-height: 40px) {
   .task-block--compact .task-block-content {
@@ -848,11 +638,13 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
   flex-wrap: wrap;
   margin: 0;
   text-align: right;
-  font-size: clamp(8px, 32cqb, 12px);
+  font-size: clamp(9px, 32cqb, 13px);
 }
 .task-block--row .task-block-end-time--double { justify-content: center; align-items: flex-end; }
 .task-block-time-kind { margin-right: 4px; }
 .task-block--row .task-block-actions {
+  --task-action-size: var(--task-row-action-size);
+  --task-action-font-size: clamp(10px, 36cqb, 16px);
   top: 50%;
   right: 8px;
   align-items: center;
@@ -896,7 +688,7 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
     left: 8px;
     width: auto;
     text-align: center;
-    font-size: 10px;
+    font-size: 11px;
   }
   .task-block--row .task-block-actions {
     top: 4px;
@@ -904,17 +696,6 @@ button.task-block-title:focus-visible { outline: 2px solid currentColor; outline
   }
 }
 
-.task-block__dialog {
-  --popup-width: 460px;
-  padding: 22px;
-}
-.task-block__defer-form { display: grid; gap: 14px; }
-.task-block__defer-form p { margin: 0; font-size: 13px; }
-.task-block__presets, .task-block__dialog-actions { display: flex; flex-wrap: wrap; gap: 7px; }
-.task-block__dialog-actions { justify-content: flex-end; }
-.task-block__date-field { display: grid; gap: 6px; }
-.task-block__date-field input { min-width: 0; padding: 9px; border: 1px solid var(--text-secondary); border-radius: 8px; background: var(--background-primary); color: var(--text-primary); }
-.task-block__defer-error { color: #ef4444; }
 @media (prefers-reduced-motion: reduce) {
   .task-block-content { transition: none; }
 }

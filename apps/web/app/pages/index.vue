@@ -1,7 +1,6 @@
 <script setup lang="ts">
 // 导入
 import type AppSidebar from '~/components/common/AppSidebar.vue'
-import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import TaskAttentionBar from '~/components/preview/Task/TaskAttentionBar.vue'
 
 // 页面配置与类型
@@ -31,9 +30,6 @@ const tasksClient = reactive(useApi({
     const phaseId = preferences.value?.defaultPhaseId
     return phaseId == null ? [] : api.api.task.get({ query: { phaseId } })
   },
-  write: (api, [id, change]: Parameters<ChangeTask>) => 'plannedDate' in change
-    ? api.api.task({ id }).postpone.patch(change)
-    : api.api.task({ id }).patch(change),
   watch: true
 }))
 const dailyTipsClient = reactive(useApi({
@@ -72,8 +68,6 @@ async function refreshContent() {
     dailyTipsClient.read()
   ])
 }
-
-const changeTask: ChangeTask = (...args) => tasksClient.write(args)
 
 // 监听
 watchEffect(() => {
@@ -162,6 +156,7 @@ onDeactivated(() => {
           background-key="home:schedule"
           :weekdays="displayedWeekdays"
           auto-center
+          focus-enabled
         />
         <p
           v-else
@@ -184,7 +179,6 @@ onDeactivated(() => {
           :tasks="tasksClient.data ?? []"
           :events-pending="eventsClient.read.loading.value"
           :refresh-events="eventsClient.read"
-          :change-task="changeTask"
           :end-date="phase.endDate"
         />
       </PageCard>

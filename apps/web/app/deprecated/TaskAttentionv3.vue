@@ -1,6 +1,5 @@
 <!-- 暂时遗弃 -->
 <script setup lang="ts">
-import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import type { AttentionSelection } from './TaskAttentionList.vue'
 import { defineAsyncComponent } from 'vue'
 import { gsap } from 'gsap'
@@ -21,7 +20,6 @@ const props = withDefaults(defineProps<{
   tasks: ApiData<Api['api']['task']['get']> | undefined
   eventsPending: boolean
   refreshEvents: () => Promise<unknown>
-  changeTask?: ChangeTask
   attention: ApiData<Api['api']['dailytask']['get']> | ApiData<Api['api']['weeklytask']['get']> | null | undefined
   attentionLoading: boolean
   refreshAttention: () => Promise<unknown>
@@ -398,7 +396,6 @@ onBeforeUnmount(() => {
         <template #default="{ item }">
           <TaskBlock
             :ref="instance => setGlassTile(item.id, instance)"
-            :change-task="props.changeTask"
             class="task-attention__block"
             :task="item.task"
             :overdue="overdue(item.task)"
@@ -524,7 +521,6 @@ onBeforeUnmount(() => {
       :events="props.events"
       :events-pending="props.eventsPending"
       :refresh-events="props.refreshEvents"
-      :change-task="props.changeTask"
       :task="selectedTask"
       :phase-id="selectedTask.phaseId"
       :open="true"

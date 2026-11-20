@@ -23,7 +23,7 @@ export interface TipOccurrence {
 }
 
 const time = (value: DateValue | undefined) => value ? new Date(value).getTime() : NaN
-const closed = (task: AttentionTask) => task.completed || task.status === 'DONE' || task.status === 'CANCELLED'
+export const isTaskClosed = (task: Pick<AttentionTask, 'completed' | 'status'>) => task.completed || task.status === 'DONE' || task.status === 'CANCELLED'
 
 // 后端返回全天候选，前后端共用筛选规则，避免上课后仍展示旧提示。
 export function dailyTipGroups<T extends AttentionTip>(tips: readonly T[], tasks: readonly AttentionTask[], occurrences: readonly TipOccurrence[], date: Date, timeZone: string, phaseId?: number) {
@@ -37,7 +37,7 @@ export function dailyTipGroups<T extends AttentionTip>(tips: readonly T[], tasks
     .sort((a, b) => time(a.time) - time(b.time) || a.scheduleId - b.scheduleId)
   const nextEventId = upcoming[0]?.eventId
   const todayEvents = new Set(upcoming.filter(value => calendarDate(value.time, timeZone) === day).map(value => value.eventId))
-  const taskTimes = tasks.filter(task => !closed(task))
+  const taskTimes = tasks.filter(task => !isTaskClosed(task))
     .flatMap(task => [task.plannedDate, task.dueDate]
       .map(time).filter(value => value >= range.start.getTime() && value < range.end.getTime())
       .map(value => ({ id: task.id, priority: task.priority, time: value })))
