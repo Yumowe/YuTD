@@ -29,13 +29,20 @@ export function dateToWeekday(date: Date, timeZone = 'UTC') {
   return calendarWeekday(calendarDate(date, timeZone))
 }
 
+const calendarFormatters = new Map<string, Intl.DateTimeFormat>()
+
 export function calendarDate(date: Date, timeZone: string): string {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit'
-  }).formatToParts(date)
+  let formatter = calendarFormatters.get(timeZone)
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    })
+    calendarFormatters.set(timeZone, formatter)
+  }
+  const parts = formatter.formatToParts(date)
 
   const get = (type: 'year' | 'month' | 'day') =>
     parts.find(part => part.type === type)?.value ?? ''

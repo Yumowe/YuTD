@@ -14,7 +14,8 @@ const emit = defineEmits<{ 'color-change': [colors: GlassColors] }>()
 const theme = inject(CardStyleKey, null)
 const element = ref<HTMLElement | null>(null)
 const resolvedColor = ref<string | null>(null)
-const colors = computed(() => blockColors(resolvedColor.value ?? props.color) ?? blockColors('#fff')!)
+const directColors = computed(() => blockColors(props.color))
+const colors = computed(() => directColors.value ?? blockColors(resolvedColor.value ?? '') ?? blockColors('#fff')!)
 const style = computed(() => ({
   'width': typeof props.width === 'number' ? `${props.width}px` : props.width,
   'height': typeof props.height === 'number' ? `${props.height}px` : props.height,
@@ -27,6 +28,10 @@ const style = computed(() => ({
 }))
 
 function updateColor() {
+  if (directColors.value) {
+    resolvedColor.value = null
+    return
+  }
   resolvedColor.value = element.value ? getComputedStyle(element.value, '::before').backgroundColor : null
 }
 watch([() => props.color, () => theme?.value.backgroundColor], updateColor, { flush: 'post' })

@@ -39,6 +39,8 @@ const props = withDefaults(defineProps<{
   mode?: 'dialog' | 'popover' | 'panel'
   /** 弹层定位的锚点元素。 */
   anchor?: HTMLElement | null
+  /** 优先放在锚点的左右两侧。 */
+  preferSide?: boolean
   /** 弹窗标题。 */
   title?: string
   /** 是否允许关闭。 */
@@ -109,10 +111,19 @@ function position() {
   let y = top + (height - popupHeight) / 2
   if (props.mode === 'popover' && props.anchor) {
     const anchor = props.anchor.getBoundingClientRect()
-    x = anchor.left
-    y = anchor.bottom + 6 + popupHeight <= top + height
-      ? anchor.bottom + 6
-      : anchor.top - popupHeight - 6
+    const gap = 6
+    if (props.preferSide && anchor.right + gap + popupWidth <= left + width) {
+      x = anchor.right + gap
+      y = anchor.top
+    } else if (props.preferSide && anchor.left - gap - popupWidth >= left) {
+      x = anchor.left - gap - popupWidth
+      y = anchor.top
+    } else {
+      x = anchor.left
+      y = anchor.bottom + gap + popupHeight <= top + height
+        ? anchor.bottom + gap
+        : anchor.top - popupHeight - gap
+    }
   }
   node.style.left = `${Math.max(left, Math.min(x, left + width - popupWidth))}px`
   node.style.top = `${Math.max(top, Math.min(y, top + height - popupHeight))}px`
@@ -283,6 +294,10 @@ function onNativeClose() {
     @cancel="onCancel"
     @close="onNativeClose"
     @toggle="onNativeClose"
+    @touchstart.stop.passive
+    @touchmove.stop.passive
+    @touchend.stop.passive
+    @touchcancel.stop.passive
   >
     <template v-if="active">
       <div class="app-popup__main">

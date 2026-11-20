@@ -3,6 +3,7 @@ import type { ApiData } from '~/utils/api'
 import { Capacitor } from '@capacitor/core'
 import { MAX_IMAGE_BYTES } from '#shared/images'
 import type { StoredImage, ImageList, ImageRotation } from '#shared/images'
+import type { LocalNotificationSchema } from '@capacitor/local-notifications'
 
 type WebApi = ReturnType<typeof createWebApi>
 export type LocalPreferences = ApiData<WebApi['api']['preferences']['get']>
@@ -41,6 +42,7 @@ export interface NativeBridge {
     tasks: Result<Routes['task']['get']>
     tips: Result<Routes['tip']['get']>
   }>
+  syncReminders(options: { authToken?: string | null, notifications: LocalNotificationSchema[] }): Promise<{ queued: number, scheduled: number }>
   updatePreferences(options: { data: Partial<LocalPreferences>, replace?: boolean }): Promise<LocalPreferences>
   resetPreferences(): Promise<LocalPreferences>
   getDataVersion(): Promise<{ version: string }>

@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import AppPopup from '../common/AppPopup.vue'
 import TaskEdit, { type EditableTask } from './TaskEdit.vue'
 import TaskBlock from '../preview/Task/TaskBlock.vue'
@@ -13,8 +12,6 @@ const props = withDefaults(defineProps<{
   eventsPending: boolean
   /** 手动重试读取课程数据。 */
   refreshEvents?: () => Promise<unknown>
-  /** 写入任务状态或延期变更。 */
-  changeTask?: ChangeTask
   /** 是否打开弹窗。 */
   open: boolean
   /** 已有任务；为空时新建。 */
@@ -111,7 +108,6 @@ defineExpose({ saving: computed(() => Boolean(editorRef.value?.saving)) })
       :simplified-image="background?.simplifiedImage"
     >
       <TaskBlock
-        :change-task="props.changeTask"
         :task="task"
         :detail="3"
         @change="emit('change')"

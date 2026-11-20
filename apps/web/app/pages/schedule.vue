@@ -148,6 +148,7 @@ onDeactivated(() => {
       :events-pending="eventsClient.read.loading.value"
       :phase="phase"
       :edge-pixels="tableSettings.edgePixels"
+      :focus-enabled="false"
       mode="full"
     />
     <div

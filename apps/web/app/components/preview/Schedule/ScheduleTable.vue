@@ -1,10 +1,11 @@
 <script setup lang="ts">
 // 组件与依赖
-import Background from '../image/BackgroundLayout.vue'
-import BackgroundSelect from '../image/BackgroundSelect.vue'
+import Background from '~/components/image/BackgroundLayout.vue'
+import BackgroundSelect from '~/components/image/BackgroundSelect.vue'
 import ScheduleTableGrid from './ScheduleTableGrid.vue'
+import { createScheduleData, ScheduleDataKey } from './scheduleData'
 import type { BackgroundSelection } from '~/components/image/BackgroundSelect.vue'
-import { gsap } from 'gsap'
+import { useSchedulePaging } from '~/composables/useAnimations/useSchedulePaging'
 
 const props = withDefaults(defineProps<{
   /** 当前阶段的课程及排课数据，未就绪时为 undefined。 */
@@ -21,6 +22,8 @@ const props = withDefaults(defineProps<{
   weekdays?: number[]
   /** 是否显示上一周期和下一周期按钮，默认 true。 */
   showPeriodNavigation?: boolean
+  /** 点击课程时启用聚焦动画，关闭时打开课程详情。 */
+  focusEnabled?: boolean
   /** 背景绑定的标识前缀，实际保存时追加阶段 ID，默认 schedule。 */
   backgroundKey?: string
   /** 进入或返回组件时，是否居中到当前时间；超出时间范围时回到顶部，默认 false。 */
@@ -29,6 +32,7 @@ const props = withDefaults(defineProps<{
   edgePixels?: number
 }>(), {
   showPeriodNavigation: true,
+  focusEnabled: false,
   autoCenter: false,
   edgePixels: 20
 })
@@ -39,10 +43,14 @@ const tasks = computed(() => props.tasks ?? [])
 const { now, timeZone } = useSystemTime()
 const { preferences } = useAppPeferences()
 const hourPixels = computed(() => preferences.value?.hourPixels ?? 72)
+const maxFocusScale = computed(() => props.focusEnabled ? (preferences.value?.maxFocusScale ?? 2) : 0)
 const phaseDay = computed(() => calendarDate(props.phase.startDate, 'UTC'))
 const phaseEnd = computed(() => calendarDate(props.phase.endDate, 'UTC'))
 const today = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
-const group = ref(1)
+const scheduleData = createScheduleData(
+  events, tasks, timeZone, computed(() => props.phase.weekCount), phaseDay, hourPixels, maxFocusScale
+)
+provide(ScheduleDataKey, scheduleData)
 
 const visibleWeekdays = computed(() => {
   if (props.mode === 'custom') {
@@ -89,20 +97,9 @@ const dateGroups = computed<Date[][]>(() => {
   return groups
 })
 
-const groupIndices = computed(() => dateGroups.value.flatMap((dates, index) => index > 0 && dates.length ? [index] : []))
-const groupPosition = computed(() => groupIndices.value.indexOf(group.value))
-const canMovePrevious = computed(() => groupPosition.value > 0)
-const canMoveNext = computed(() => groupPosition.value >= 0 && groupPosition.value < groupIndices.value.length - 1)
-
-const pagesElement = ref<HTMLElement | null>(null)
 const activeGrid = shallowRef<InstanceType<typeof ScheduleTableGrid> | null>(null)
 
 // 时间范围和左轴由外层统一绘制，聚焦时跟随当前表格页的纵向缩放。
-function timeToMinutes(time: string) {
-  const [hours, minutes] = time.split(':').map(Number) as [number, number]
-  return hours * 60 + minutes
-}
-
 function dateToMinutes(date: Date) {
   const { hour, minute } = clockParts(date, timeZone.value)
   return hour * 60 + minute
@@ -112,20 +109,7 @@ function minutesToTime(minutes: number) {
   return `${Math.floor(minutes / 60).toString().padStart(2, '0')}:${(minutes % 60).toString().padStart(2, '0')}`
 }
 
-const scheduleBounds = computed(() => {
-  const minutes: number[] = []
-  for (const schedule of events.value.flatMap(event => event.schedules)) {
-    if (schedule.startTime && schedule.endTime) minutes.push(timeToMinutes(schedule.startTime), timeToMinutes(schedule.endTime))
-  }
-  for (const task of tasks.value) {
-    if (task.plannedDate) minutes.push(dateToMinutes(task.plannedDate))
-    if (task.dueDate) minutes.push(dateToMinutes(task.dueDate))
-  }
-  return {
-    start: Math.floor((minutes.length ? Math.min(...minutes) : 8 * 60) / 60) * 60,
-    end: Math.ceil((minutes.length ? Math.max(...minutes) : 22 * 60) / 60) * 60
-  }
-})
+const scheduleBounds = scheduleData.bounds
 
 const hourMarks = computed(() => Array.from(
   { length: (scheduleBounds.value.end - scheduleBounds.value.start) / 60 + 1 },
@@ -140,50 +124,6 @@ function minutesToY(minutes: number) {
     + props.edgePixels + (axisLayout.value?.offsetY ?? 0)
 }
 
-const weekLabel = computed(() => [...new Set((dateGroups.value[group.value] ?? []).map(date =>
-  Math.floor((calendarDayNumber(calendarDate(date, timeZone.value)) - calendarDayNumber(phaseDay.value)) / 7) + 1
-))].filter(week => week >= 1 && week <= props.phase.weekCount).join(' / ') || '—')
-
-const currentTimeY = computed(() => {
-  if (!now.value || !(dateGroups.value[group.value] ?? []).some(date => calendarDate(date, timeZone.value) === today.value)) return null
-  const minutes = dateToMinutes(now.value) + clockParts(now.value, timeZone.value).second / 60
-  return minutes < scheduleBounds.value.start || minutes > scheduleBounds.value.end ? null : minutesToY(minutes)
-})
-
-const slide = { value: 0 }
-const dragging = ref(false)
-const settling = ref(false)
-let slideTween: ReturnType<typeof gsap.to> | undefined
-let settleDirection: -1 | 0 | 1 = 0
-let swipe: { id: number, x: number, y: number, width: number, offset: number, horizontal: boolean } | null = null
-let suppressClickUntil = 0
-
-const periodPages = computed(() => [-1, 0, 1].map((offset) => {
-  const index = groupIndices.value[groupPosition.value + offset]
-  const dates = index === undefined ? undefined : dateGroups.value[index]
-  return {
-    dates,
-    offset,
-    key: dates ? `${index}:${dates.map(date => date.getTime()).join(',')}` : `empty:${offset}`
-  }
-}))
-
-function setActiveGrid(component: unknown, offset: number) {
-  if (!component) return
-  const grid = component as InstanceType<typeof ScheduleTableGrid>
-  if (offset === 0) {
-    activeGrid.value = grid
-    grid.activate()
-  } else {
-    grid.deactivate()
-  }
-  grid.setMoving(settling.value || dragging.value)
-}
-
-watch([dragging, settling], ([dragging, settling]) => {
-  activeGrid.value?.setMoving(dragging || settling)
-})
-
 // 背景选择与裁剪尺寸
 const backgroundSelection = shallowRef<BackgroundSelection | null>(null)
 
@@ -195,9 +135,8 @@ const backgroundRatio = ref<number>()
 
 let backgroundObserver: ResizeObserver | undefined
 
-watch(background, (component) => {
-  backgroundObserver?.disconnect()
-  const element = component?.$el as HTMLElement | undefined
+onMounted(() => {
+  const element = background.value?.$el as HTMLElement | undefined
   if (!element) return
   const resize = () => {
     if (element.clientWidth && element.clientHeight) backgroundRatio.value = element.clientWidth / element.clientHeight
@@ -205,177 +144,103 @@ watch(background, (component) => {
   resize()
   backgroundObserver = new ResizeObserver(resize)
   backgroundObserver.observe(element)
-}, { flush: 'post' })
+})
 
 const { mode: systemMode } = useSystemStatus()
 
-// 前后周期提前挂载，共用外层背景；切换时只移动表格。
-function renderSlide() {
-  pagesElement.value?.style.setProperty('--schedule-shift', `${slide.value * 100}%`)
-}
-
-function resetPeriodMotion() {
-  slideTween?.kill()
-  slideTween = undefined
-  settleDirection = 0
-  swipe = null
-  slide.value = 0
-  renderSlide()
-  dragging.value = false
-  settling.value = false
-}
-
-function settlePeriod(direction: -1 | 0 | 1) {
-  slideTween?.kill()
-  settleDirection = direction
-  dragging.value = false
-  settling.value = true
-  const finish = () => {
-    group.value = groupIndices.value[groupPosition.value + direction] ?? group.value
-    slide.value = 0
-    renderSlide()
-    settling.value = false
-    slideTween = undefined
-    settleDirection = 0
-  }
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    finish()
-    return
-  }
-  slideTween = gsap.to(slide, {
-    value: -direction,
-    duration: direction ? 0.3 : 0.2,
-    ease: 'power3.out',
-    onUpdate: renderSlide,
-    onComplete: finish
-  })
-}
-
-function movePeriod(direction: -1 | 1) {
-  if (settling.value || (direction < 0 ? !canMovePrevious.value : !canMoveNext.value)) return
-  settlePeriod(direction)
-}
-
-// 捕获 viewport 内的触摸，不让按钮或任务自己的事件拦掉横滑。
-function startSwipe(event: TouchEvent) {
-  suppressClickUntil = 0
-  if (event.touches.length !== 1) {
-    cancelSwipe()
-    return
-  }
-  if (groupPosition.value < 0) return
-  const touch = event.touches[0]!
-  const width = pagesElement.value?.clientWidth
-  if (!width) return
-  swipe = { id: touch.identifier, x: touch.clientX, y: touch.clientY, width, offset: 0, horizontal: false }
-}
-
-function moveSwipe(event: TouchEvent) {
-  if (!swipe) return
-  const touch = event.touches[0]
-  if (event.touches.length !== 1 || touch?.identifier !== swipe.id) {
-    cancelSwipe()
-    return
-  }
-  const dx = touch.clientX - swipe.x
-  const dy = touch.clientY - swipe.y
-  if (!swipe.horizontal) {
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < 12) return
-    if (Math.abs(dx) <= Math.abs(dy) * 1.5) {
-      swipe = null
-      return
-    }
-    swipe.horizontal = true
-    dragging.value = true
-    if (settling.value) {
-      slideTween?.kill()
-      slideTween = undefined
-      group.value = groupIndices.value[groupPosition.value + settleDirection] ?? group.value
-      slide.value += settleDirection
-      settleDirection = 0
-      settling.value = false
-    }
-    const allowed = slide.value > 0 ? canMovePrevious.value : canMoveNext.value
-    swipe.offset = slide.value / (allowed ? 1 : 0.2)
-  }
-  if (event.cancelable) event.preventDefault()
-  event.stopPropagation()
-  suppressClickUntil = performance.now() + 250
-  const offset = swipe.offset + dx / swipe.width
-  const allowed = offset > 0 ? canMovePrevious.value : canMoveNext.value
-  slide.value = Math.max(-1, Math.min(1, offset)) * (allowed ? 1 : 0.2)
-  renderSlide()
-}
-
-function endSwipe(event: TouchEvent) {
-  const current = swipe
-  swipe = null
-  if (!current?.horizontal) return
-  if (event.cancelable) event.preventDefault()
-  event.stopPropagation()
-  suppressClickUntil = performance.now() + 250
-  const touch = Array.from(event.changedTouches).find(touch => touch.identifier === current.id)
-  if (!touch || event.touches.length) {
-    settlePeriod(0)
-    return
-  }
-  const dx = touch.clientX - current.x
-  const dy = touch.clientY - current.y
-  const direction = dx < 0 ? 1 : -1
-  const allowed = direction < 0 ? canMovePrevious.value : canMoveNext.value
-  settlePeriod(allowed && Math.abs(dx) >= Math.min(72, current.width * 0.2)
-    && Math.abs(dx) > Math.abs(dy) * 1.5
-    ? direction
-    : 0)
-}
-
-function cancelSwipe() {
-  const horizontal = swipe?.horizontal
-  swipe = null
-  if (horizontal) settlePeriod(0)
-}
-
-function suppressSwipeClick(event: MouseEvent) {
-  if (event.detail === 0 || performance.now() >= suppressClickUntil) return
-  suppressClickUntil = 0
-  event.preventDefault()
-  event.stopImmediatePropagation()
-}
-
-// 配置变化时定位今天所在组；业务数据刷新时保留已有的有效组号。
-watch([dateGroups, today, () => props.phase.id, () => props.mode, () => props.weekdays?.join(','), timeZone],
-  ([groups, day], previous) => {
-    const configurationChanged = !previous || day !== previous[1] || props.phase.id !== previous[2]
-      || props.mode !== previous[3] || props.weekdays?.join(',') !== previous[4] || timeZone.value !== previous[5]
-    if (!configurationChanged && previous?.[0]?.some(dates => dates.length) && groupIndices.value.includes(group.value)) return
-    resetPeriodMotion()
-    const week = day ? Math.floor((calendarDayNumber(day) - calendarDayNumber(phaseDay.value)) / 7) + 1 : -1
-    const containing = props.mode !== 'custom' && groups[week]?.length
-      ? week
-      : day ? groups.findIndex(dates => dates.some(date => calendarDate(date, timeZone.value) === day)) : -1
-    const upcoming = day ? groupIndices.value.find(index => calendarDate(groups[index]![0]!, timeZone.value) >= day) : undefined
-    group.value = containing > 0 ? containing : (day ? upcoming ?? groupIndices.value.at(-1) : groupIndices.value[0]) ?? 1
-  }, { immediate: true })
-
-watch(group, () => {
-  if (groupIndices.value.includes(group.value)) return
-  resetPeriodMotion()
-  group.value = groupIndices.value.find(index => index >= group.value) ?? groupIndices.value.at(-1) ?? 1
+onBeforeUnmount(() => {
+  backgroundObserver?.disconnect()
 })
+
+// ==================== 翻页动画与触发 ====================
+const groupIndices = computed(() => dateGroups.value.flatMap((dates, index) => index > 0 && dates.length ? [index] : []))
+const {
+  group,
+  groupPosition,
+  canMovePrevious,
+  canMoveNext,
+  pagesElement,
+  trackElement,
+  dragging,
+  settling,
+  resetPeriodMotion,
+  movePeriod,
+  resetSwipeClick,
+  startSwipe,
+  moveSwipe,
+  endSwipe,
+  cancelSwipe,
+  suppressSwipeClick
+} = useSchedulePaging(groupIndices)
+
+const periodPages = computed(() => [-1, 0, 1].map((offset) => {
+  const index = groupIndices.value[groupPosition.value + offset]
+  const dates = index === undefined ? undefined : dateGroups.value[index]
+  return {
+    dates,
+    offset,
+    key: (groupPosition.value + offset + 3) % 3
+  }
+}))
+
+function setActiveGrid(component: unknown, offset: number) {
+  if (!component) return
+  const grid = component as InstanceType<typeof ScheduleTableGrid>
+  if (offset === 0) {
+    grid.activate()
+    if (activeGrid.value !== grid) {
+      activeGrid.value = grid
+      void nextTick(positionInitially)
+    }
+  } else {
+    grid.deactivate()
+  }
+  grid.setMoving(settling.value || dragging.value)
+}
+
 // 自动定位属于外层显示策略，避免预加载页影响滚动位置。
 const initialPosition = ref(true)
+const dataReady = computed(() => !props.eventsPending && props.events !== undefined && props.tasks !== undefined)
+
 function positionInitially() {
-  if (!props.autoCenter || !initialPosition.value || props.eventsPending || props.events === undefined || props.tasks === undefined) return
+  if (!props.autoCenter || !initialPosition.value || !dataReady.value) return
   if (activeGrid.value?.centerCurrentTime()) initialPosition.value = false
 }
 
-watch([() => props.autoCenter, today, group, dateGroups], () => {
-  initialPosition.value = true
-  void nextTick(positionInitially)
-})
-watch([activeGrid, events, tasks, axisHeaderHeight, boardHeight, () => props.eventsPending], () => {
-  void nextTick(positionInitially)
-}, { flush: 'post' })
+const periodSettings = computed(() => JSON.stringify([
+  today.value, props.phase.id, props.mode, props.weekdays?.join(','), timeZone.value
+]))
+
+function initialGroup(groups: Date[][]) {
+  const day = today.value
+  if (!day) return groupIndices.value[0] ?? 1
+  const week = Math.floor((calendarDayNumber(day) - calendarDayNumber(phaseDay.value)) / 7) + 1
+  const containing = props.mode !== 'custom' && groups[week]?.length
+    ? week
+    : groups.findIndex(dates => dates.some(date => calendarDate(date, timeZone.value) === day))
+  if (containing > 0) return containing
+  const upcoming = groupIndices.value.find(index => calendarDate(groups[index]![0]!, timeZone.value) >= day)
+  return upcoming ?? groupIndices.value.at(-1) ?? 1
+}
+
+watch([group, dateGroups, periodSettings, () => props.autoCenter, dataReady],
+  ([current, groups, settings, autoCenter], [previous, previousGroups, previousSettings, previousAutoCenter]) => {
+    const settingsChanged = settings !== previousSettings
+    const invalidGroup = !groupIndices.value.includes(current)
+    if (settingsChanged || (groups !== previousGroups && invalidGroup)
+      || (!previousGroups?.some(dates => dates.length) && groupIndices.value.length)) {
+      resetPeriodMotion()
+      group.value = initialGroup(groups)
+    } else if (invalidGroup && groupIndices.value.length) {
+      resetPeriodMotion()
+      group.value = groupIndices.value.find(index => index >= current) ?? groupIndices.value.at(-1) ?? 1
+    }
+    if (current !== previous || groups !== previousGroups || settingsChanged || autoCenter !== previousAutoCenter) {
+      initialPosition.value = true
+    }
+    if (props.autoCenter && initialPosition.value && dataReady.value) void nextTick(positionInitially)
+  }, { immediate: true })
+
 onActivated(() => {
   activeGrid.value?.activate()
   activeGrid.value?.setMoving(false)
@@ -383,10 +248,15 @@ onActivated(() => {
   void nextTick(positionInitially)
 })
 
-onDeactivated(resetPeriodMotion)
-onBeforeUnmount(() => {
-  resetPeriodMotion()
-  backgroundObserver?.disconnect()
+// 当前周与时间标记
+const weekLabel = computed(() => [...new Set((dateGroups.value[group.value] ?? []).map(date =>
+  Math.floor((calendarDayNumber(calendarDate(date, timeZone.value)) - calendarDayNumber(phaseDay.value)) / 7) + 1
+))].filter(week => week >= 1 && week <= props.phase.weekCount).join(' / ') || '—')
+
+const currentTimeY = computed(() => {
+  if (!now.value || !(dateGroups.value[group.value] ?? []).some(date => calendarDate(date, timeZone.value) === today.value)) return null
+  const minutes = dateToMinutes(now.value) + clockParts(now.value, timeZone.value).second / 60
+  return minutes < scheduleBounds.value.start || minutes > scheduleBounds.value.end ? null : minutesToY(minutes)
 })
 
 defineExpose({ dateGroups, group })
@@ -395,7 +265,7 @@ defineExpose({ dateGroups, group })
 <template>
   <div
     class="schedule-viewport"
-    @pointerdown.capture="suppressClickUntil = 0"
+    @pointerdown.capture="resetSwipeClick"
     @touchstart.capture.passive="startSwipe"
     @touchmove.capture="moveSwipe"
     @touchend.capture="endSwipe"
@@ -457,7 +327,7 @@ defineExpose({ dateGroups, group })
               v-for="minute in hourMarks"
               :key="minute"
               class="schedule-hour-label"
-              :style="{ top: `${minutesToY(minute)}px` }"
+              :style="{ translate: `0 ${minutesToY(minute)}px` }"
             >
               <span class="hour-full">{{ minutesToTime(minute) }}</span>
               <span class="hour-short">{{ minutesToTime(minute).split(':')[0] }}</span>
@@ -465,7 +335,7 @@ defineExpose({ dateGroups, group })
             <span
               v-if="currentTimeY !== null"
               class="schedule-current-time-arrow"
-              :style="{ top: `${currentTimeY}px` }"
+              :style="{ translate: `0 ${currentTimeY}px` }"
               aria-hidden="true"
             />
           </div>
@@ -474,7 +344,10 @@ defineExpose({ dateGroups, group })
           ref="pagesElement"
           class="schedule-pages"
         >
-          <div class="schedule-track">
+          <div
+            ref="trackElement"
+            class="schedule-track"
+          >
             <div
               v-for="page in periodPages"
               :key="page.key"
@@ -490,6 +363,7 @@ defineExpose({ dateGroups, group })
                 :phase="phase"
                 :dates="page.dates"
                 :edge-pixels="edgePixels"
+                :focus-enabled="focusEnabled"
               />
             </div>
           </div>
@@ -579,6 +453,7 @@ defineExpose({ dateGroups, group })
 
 .schedule-hour-label {
   position: absolute;
+  top: 0;
   left: 0;
   right: 0;
   text-align: center;
@@ -591,6 +466,7 @@ defineExpose({ dateGroups, group })
 
 .schedule-current-time-arrow {
   position: absolute;
+  top: 0;
   right: 0;
   width: 8px;
   height: 12px;
@@ -612,7 +488,7 @@ defineExpose({ dateGroups, group })
   width: 100%;
   min-width: 0;
   align-self: start;
-  transform: translate3d(calc(-100% + var(--schedule-shift, 0%)), 0, 0);
+  transform: translate3d(-100%, 0, 0);
   will-change: transform;
 }
 

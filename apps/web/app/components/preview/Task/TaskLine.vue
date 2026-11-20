@@ -2,13 +2,10 @@
 import TaskBlock from '~/components/preview/Task/TaskBlock.vue'
 import AppPopup from '~/components/common/AppPopup.vue'
 import BackgroundLayout from '~/components/image/BackgroundLayout.vue'
-import type { ChangeTask } from '~/components/preview/Task/TaskBlock.vue'
 import { BackgroundContextKey } from '~/components/image/background'
 import { GlassLayerKey } from '~/components/preview/card/glass/edges'
 
 const props = withDefaults(defineProps<{
-  /** 写入任务状态或延期变更。 */
-  changeTask?: ChangeTask
   /** 任务时间线的像素位置。 */
   top: number
   /** 计划时间线或截止时间线。 */
@@ -65,15 +62,12 @@ watch([() => props.task?.id, () => props.interactive], () => {
   opened.value = false
 })
 
-const lineStyle = computed(() => ({
-  top: `${props.top}px`
+const positionStyle = computed(() => ({
+  translate: `0 ${props.top}px`
 }))
 
-const labelStyle = computed(() => ({ top: `${props.top}px` }))
-
 const markerStyle = computed(() => ({
-  top: `${props.top}px`,
-  right: `calc(3px + ${(props.markerOffset ?? 0) / 18} * var(--task-marker-size))`
+  translate: `calc(${-(props.markerOffset ?? 0) / 18} * var(--task-marker-size)) ${props.top}px`
 }))
 </script>
 
@@ -87,7 +81,7 @@ const markerStyle = computed(() => ({
       ref="anchor"
       type="button"
       :class="covered ? 'task-marker' : 'task-label'"
-      :style="covered ? markerStyle : labelStyle"
+      :style="covered ? markerStyle : positionStyle"
       :aria-controls="popoverId"
       :aria-expanded="opened"
       aria-haspopup="dialog"
@@ -107,7 +101,7 @@ const markerStyle = computed(() => ({
     <div
       v-else-if="!covered"
       class="task-label"
-      :style="labelStyle"
+      :style="positionStyle"
       :title="taskName"
     >
       <span
@@ -123,7 +117,7 @@ const markerStyle = computed(() => ({
         'task-line--plan': kind === 'plan',
         'task-line--due': kind === 'due'
       }"
-      :style="lineStyle"
+      :style="positionStyle"
       :data-task-id="taskId"
     />
     <AppPopup
@@ -143,14 +137,12 @@ const markerStyle = computed(() => ({
         :analysis="glassLayer?.analysis.value"
       >
         <TaskBlock
-          :change-task="props.changeTask"
           :task="task"
           :detail="3"
         />
       </BackgroundLayout>
       <TaskBlock
         v-else
-        :change-task="props.changeTask"
         :task="task"
         :detail="3"
       />
@@ -163,6 +155,7 @@ const markerStyle = computed(() => ({
 
 .task-line {
   position: absolute;
+  top: 0;
   z-index: 5;
   right: 0px;
   left: 0px;
@@ -174,6 +167,7 @@ const markerStyle = computed(() => ({
 
 .task-label {
   position: absolute;
+  top: 0;
   z-index: 6;
   left: 3px;
   right: 3px;
@@ -225,6 +219,8 @@ button.task-label {
 .task-label > .task-marker__triangle { display: none; }
 .task-marker {
   position: absolute;
+  top: 0;
+  right: 3px;
   z-index: 7;
   display: grid;
   place-items: center;

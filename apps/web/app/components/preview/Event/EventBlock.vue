@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import Card from '../card/Card.vue'
-import { gsap } from 'gsap'
-import { TextPlugin } from 'gsap/TextPlugin'
+import { useEventTipTyping } from '~/composables/useAnimations/useEventTipTyping'
 
 const props = withDefaults(defineProps<{
   /** 距离时间表顶部的像素位置。 */
@@ -54,83 +53,18 @@ function invertColor(hex: string): string {
 
 const tColor = computed(() => invertColor(tintColor.value))
 
-const visibleTips = computed(() => (props.tips ?? []).filter(tip => tip.content.trim()))
-
 const blockStyle = computed(() => ({
-  'top': `${props.top}px`,
+  'translate': `0 ${props.top}px`,
   'height': `${props.height}px`,
   '--event-color': props.color ?? 'var(--text-primary)'
 }))
 
-const progress = computed(() => props.focused ? Math.max(0, Math.min(1, props.focusProgress ?? 0)) : 0)
+// ==================== 提示动画与聚焦点击 ====================
+const visibleTips = computed(() => (props.tips ?? []).filter(tip => tip.content.trim()))
 
-const tipElements = ref<HTMLElement[]>([])
-
-const retracting = ref(false)
-
-let typing: ReturnType<typeof gsap.timeline> | undefined
-
-let typingTween: ReturnType<typeof gsap.to> | undefined
-
-function clearTyping() {
-  typingTween?.kill()
-  typingTween = undefined
-  typing?.progress(0)
-  typing?.kill()
-  typing = undefined
-  retracting.value = false
-}
-
-function buildTyping(value = progress.value) {
-  clearTyping()
-  typing = gsap.timeline({ paused: true })
-  const escaped = document.createElement('span')
-  for (const tip of visibleTips.value) {
-    const element = tipElements.value.find(element => element.dataset.tipId === String(tip.id))
-    if (!element) continue
-    element.textContent = ''
-    escaped.textContent = tip.content
-    typing.to(element, {
-      text: { value: escaped.innerHTML, preserveSpaces: true },
-      duration: Array.from(tip.content).length,
-      ease: 'none'
-    })
-  }
-  typing.progress(value)
-}
-
-onMounted(() => {
-  gsap.registerPlugin(TextPlugin)
-  watch([visibleTips, progress], ([tips, value], previous) => {
-    if (!tips.length) {
-      clearTyping()
-    } else if (value === 0) {
-      if (typing && typing.progress() > 0 && (props.focusProgress ?? 0) > 0) {
-        typingTween?.kill()
-        retracting.value = true
-        typingTween = typing.tweenTo(0, { duration: 0.45, ease: 'power4.out', onComplete: clearTyping })
-      } else {
-        clearTyping()
-      }
-    } else if (!typing || tips !== previous?.[0]) {
-      buildTyping(value === 1 ? 0 : value)
-      if (value === 1) {
-        typingTween = typing?.tweenTo(typing.duration(), { duration: 0.45, ease: 'power4.out' })
-      }
-    } else {
-      typingTween?.kill()
-      typingTween = undefined
-      if (retracting.value && value === 1) {
-        typingTween = typing.tweenTo(typing.duration(), { duration: 0.45, ease: 'power4.out' })
-      } else {
-        typing.progress(value < (previous?.[1] ?? value) ? Math.min(value, typing.progress()) : value)
-      }
-      retracting.value = false
-    }
-  }, { immediate: true, flush: 'post' })
-})
-
-onBeforeUnmount(clearTyping)
+const { progress, retracting, tipElements } = useEventTipTyping(
+  visibleTips, () => props.focused, () => props.focusProgress
+)
 
 function handleClick(event: MouseEvent) {
   const element = event.currentTarget
@@ -238,7 +172,9 @@ function handleClick(event: MouseEvent) {
 
 <style scoped>
 .event-block {
+  -webkit-tap-highlight-color: transparent;
   position: absolute;
+  top: 0;
   z-index: 4;
   right: 0px;
   left: 0px;
