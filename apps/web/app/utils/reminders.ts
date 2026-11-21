@@ -1,27 +1,25 @@
 import type { LocalNotificationSchema } from '@capacitor/local-notifications'
-import type { NativeBridge } from '~/api/native'
-import { addCalendarDays, calendarDate, calendarWeekday, parseZonedDateTime, taskDateRange } from '#shared/time'
-
-type ReminderData = Awaited<ReturnType<NativeBridge['getReminderData']>>
+import type { NativeBridge, ReminderData } from '~/api/native'
+import { addCalendarDays, calendarDate, calendarDateKey, calendarWeekday, scheduleTimeRange, weekStartDate } from './date'
 
 export function reminderText(template: string, values: Record<string, string>) {
   return template.replace(/\{\{\s*([^{}]+?)\s*\}\}/g, (_, token: string) => values[token] ?? '')
     .split('\n').map(line => line.trim()).filter(Boolean).join('\n')
 }
 
-export function planReminders(data: ReminderData, now = new Date(), exact = false): LocalNotificationSchema[] {
+export function planReminders(data: ReminderData | Awaited<ReturnType<NativeBridge['getReminderData']>>, now = new Date(), exact = false) {
   const { preferences: p, tasks, events, phases, tips } = data
   if (!p.enableReminder) return []
   const timeZone = p.timeZone
   const open = tasks.filter(task => !task.completed && task.status !== 'DONE' && task.status !== 'CANCELLED')
-  const candidates = new Map<string, { at: Date, title: string, body: string, kind: string, targetId: number }>()
+  const candidates = new Map<string, { at: Date, title: string, body: string, kind: 'event' | 'task', targetId: number }>()
   const formatTime = (date: Date) => new Intl.DateTimeFormat(p.defaultLocale, {
     timeZone, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false
   }).format(date)
   function relatedTips(phaseId: number, date: Date, eventId?: number | null, taskId?: number) {
     const day = calendarDate(date, timeZone)
-    const week = taskDateRange(day, timeZone, true).startDate
-    const matchDate = (item: { date: string, phaseId?: number | null }, selected: string) => item.date === selected && (item.phaseId == null || item.phaseId === phaseId)
+    const week = weekStartDate(day)
+    const matchDate = (item: { date: Date | string, phaseId?: number | null }, selected: string) => calendarDateKey(item.date) === selected && (item.phaseId == null || item.phaseId === phaseId)
     return tips.filter(tip => tip.phases.some(phase => phase.id === phaseId)
       || tip.events.some(event => event.id === eventId) || tip.tasks.some(task => task.id === taskId)
       || tip.dates.some(value => matchDate(value, day)) || tip.weeks.some(value => matchDate(value, week)))
@@ -52,8 +50,8 @@ export function planReminders(data: ReminderData, now = new Date(), exact = fals
     for (const event of events) {
       const phase = phases.find(phase => phase.id === event.phaseId)
       if (!phase) continue
-      const first = phase.startDate.slice(0, 10)
-      const end = phase.endDate.slice(0, 10)
+      const first = calendarDateKey(phase.startDate)
+      const end = calendarDateKey(phase.endDate)
       for (const schedule of event.schedules) {
         if (!Array.isArray(schedule.weeks)) continue
         for (const week of schedule.weeks) {
@@ -61,10 +59,9 @@ export function planReminders(data: ReminderData, now = new Date(), exact = fals
           const weekStart = addCalendarDays(first, (week - 1) * 7)
           const day = addCalendarDays(weekStart, (schedule.weekday - calendarWeekday(weekStart) + 7) % 7)
           if (day > end) continue
-          const date = parseZonedDateTime(`${day}T${schedule.startTime}`, timeZone, 'compatible')
-          if (calendarDate(date, timeZone) !== day) continue
-          const endDay = schedule.endTime <= schedule.startTime ? addCalendarDays(day, 1) : day
-          const finish = parseZonedDateTime(`${endDay}T${schedule.endTime}`, timeZone, 'compatible')
+          const interval = scheduleTimeRange(day, schedule.startTime, schedule.endTime, timeZone)
+          if (!interval) continue
+          const { start: date, end: finish } = interval
           add(`event:${schedule.id}:${date.getTime()}`, new Date(date.getTime() - p.eventReminderMinutes * 60000), date, 'event', event.id, {
             title: event.name, time: `${formatTime(date)} — ${formatTime(finish)}`,
             location: schedule.location || event.location || '', event: event.name,
@@ -85,6 +82,6 @@ export function planReminders(data: ReminderData, now = new Date(), exact = fals
     const signature = JSON.stringify([key, item.title, item.body, exact])
     return { id, title: item.title, body: item.body, schedule: { at: item.at, allowWhileIdle: true },
       channelId: 'yutd-reminders', smallIcon: 'ic_stat_reminder', isExactNotification: exact,
-      extra: { owner: 'yutd-reminders', signature, kind: item.kind, targetId: item.targetId } }
+      extra: { owner: 'yutd-reminders', signature, kind: item.kind, targetId: item.targetId } } satisfies LocalNotificationSchema
   })
 }

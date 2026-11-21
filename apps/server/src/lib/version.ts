@@ -1,4 +1,5 @@
 import { prisma } from './prisma'
+import { calendarDate } from '#shared/time'
 
 export async function readDataVersion() {
   const info = await prisma.serverInfo.findUnique({ where: { id: 1 }, select: { version: true, updatedAt: true } })
@@ -6,9 +7,9 @@ export async function readDataVersion() {
       where: { id: 1 }, create: { id: 1 }, update: {}, select: { version: true, updatedAt: true }
     })
   const preferences = await prisma.preferences.findUnique({ where: { id: 1 }, select: { timeZone: true } })
-  const calendar = new Intl.DateTimeFormat('en-CA', { timeZone: preferences?.timeZone ?? 'UTC', year: 'numeric', month: '2-digit', day: '2-digit' })
+  const timeZone = preferences?.timeZone ?? 'UTC'
   const now = new Date()
-  if (calendar.format(info.updatedAt) !== calendar.format(now)) {
+  if (calendarDate(info.updatedAt, timeZone) !== calendarDate(now, timeZone)) {
     // 用数据库条件保证跨日时的并发读取只递增一次，重启后也能判断。
     await prisma.serverInfo.updateMany({
       where: { id: 1, version: info.version, updatedAt: info.updatedAt },

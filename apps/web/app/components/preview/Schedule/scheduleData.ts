@@ -1,5 +1,5 @@
 import { computed, type InjectionKey, type Ref } from 'vue'
-import { calendarDate, calendarDayNumber, calendarWeekday, clockParts, timeToMinutes } from '~/utils/date'
+import { calendarDate, calendarWeekday, dateToMinutes, timeToMinutes, weekNumberFrom } from '~/utils/date'
 
 type ScheduleEvent = ApiData<Api['api']['event']['get']>[number]
 type ScheduleTask = ApiData<Api['api']['task']['get']>[number]
@@ -98,8 +98,7 @@ export function createScheduleData(
         const value = kind === 'plan' ? task.plannedDate : task.dueDate
         if (!value) continue
         const date = calendarDate(value, timeZone.value)
-        const { hour, minute } = clockParts(value, timeZone.value)
-        const minutes = hour * 60 + minute
+        const minutes = Math.floor(dateToMinutes(value, timeZone.value))
         const entries = byDate.get(date) ?? []
         if (!byDate.has(date)) byDate.set(date, entries)
         entries.push({ key: `${task.id}-${kind}`, task, kind, minutes })
@@ -124,11 +123,10 @@ export function createScheduleData(
 
   const taskLines = computed(() => {
     const byDate = new Map<string, IndexedTaskLine[]>()
-    const phaseStart = calendarDayNumber(phaseDay.value)
     const normalScale = hourPixels.value / 60
     const focusedScale = normalScale * (1 + maxFocusScale.value)
     for (const [date, entries] of taskTimes.value.byDate) {
-      const week = Math.floor((calendarDayNumber(date) - phaseStart) / 7) + 1
+      const week = weekNumberFrom(date, phaseDay.value)
       const courses = schedules.value.byPeriod.get(`${week}:${calendarWeekday(date)}`) ?? []
       const rows = entries.map(entry => ({
         ...entry,

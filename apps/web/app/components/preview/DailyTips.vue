@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { dailyTipDateKey, visibleDailyTips } from '~/utils/dailyTips'
+import { calendarDateKey, formatClockTime } from '~/utils/date'
+import { visibleDailyTips } from '~/utils/dailyTips'
 
 type DailyTips = ApiData<Api['api']['dailytips']['get']>
 
@@ -27,11 +28,11 @@ const day = computed(() => props.date || (now.value ? calendarDate(now.value, ti
 
 function tipTime(time: number | null) {
   if (time === null) return '全天'
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: timeZone.value, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(time)
+  return formatClockTime(time, timeZone.value)
 }
 
 const visibleTips = computed(() => {
-  if (!props.snapshotDate || dailyTipDateKey(props.snapshotDate) !== day.value) return []
+  if (!props.snapshotDate || calendarDateKey(props.snapshotDate) !== day.value) return []
   const date = now.value && calendarDate(now.value, timeZone.value) === day.value
     ? now.value
     : parseZonedDateTime(day.value, timeZone.value)

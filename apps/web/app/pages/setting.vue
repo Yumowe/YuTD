@@ -256,10 +256,16 @@ onBeforeUnmount(() => window.removeEventListener('pointerdown', dismissFontPicke
             </label>
           </PageCard>
           <PageCard class="settings-reminders">
-            <header class="content-heading">
+            <header class="content-heading panel-row">
               <h2 class="panel-title">
                 提醒
               </h2>
+              <NuxtLink
+                class="button"
+                to="/reminder"
+              >
+                提醒检查
+              </NuxtLink>
             </header>
             <div class="panel-stack">
               <template v-if="preferences">

@@ -38,6 +38,7 @@ export default defineNuxtPlugin({
             await LocalNotifications.createChannel({ id: 'yutd-reminders', name: '课程与任务提醒', importance: 4, visibility: 0, vibration: true })
           }
           await native.syncReminders({ authToken: authToken.value, notifications: plan })
+          if (!disposed) window.dispatchEvent(new Event('yutd:reminders-synced'))
         } while (dirty && !disposed)
       } catch (error) {
         reportError(error, '同步系统提醒失败')
@@ -51,7 +52,9 @@ export default defineNuxtPlugin({
     }
     window.addEventListener('yutd:reminders-changed', queue)
     app.hook('app:mounted', queue)
-    const removeRoute = router.afterEach(queue)
+    const removeRoute = router.afterEach((to) => {
+      if (to.name !== 'reminder') queue()
+    })
     const listener = App.addListener('appStateChange', queue)
     const cleanup = () => {
       disposed = true

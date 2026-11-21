@@ -2,9 +2,8 @@ import type { Prisma, Task } from '#prisma/client'
 import type { TaskModelType } from '#backend/modules/task/model'
 import { BadRequestException, NotFoundException } from 'elysia-http-exception'
 import { prisma } from '#backend/lib/prisma'
-import { calendarDate, parseZonedDateTime, taskDateRange } from '#shared/time'
+import { addCalendarDays, calendarDate, calendarDateKey, getPhaseWeekCount, getPhaseWeekNumber, parseZonedDateTime, taskDateRange } from '#shared/time'
 import { PreferencesService } from '../preferences/service'
-import { getPhaseWeekCount, getPhaseWeekNumber } from '../phase/service'
 
 async function validateRelations(phaseId?: number, eventId?: number, database: Pick<Prisma.TransactionClient, 'phase' | 'event'> = prisma) {
   if (!phaseId)
@@ -137,11 +136,7 @@ export abstract class TaskService {
         if (!Number.isInteger(weekNumber) || weekNumber < 1 || weekNumber > weekCount)
           throw new BadRequestException('选择的周超出了阶段范围')
 
-        // 按阶段开始日期计算第 N 周的起始日期
-        const start = new Date(phase.startDate)
-        start.setUTCDate(start.getUTCDate() + (weekNumber - 1) * 7)
-
-        date = start.toISOString().slice(0, 10)
+        date = addCalendarDays(calendarDateKey(phase.startDate), (weekNumber - 1) * 7)
         requestedWeek = weekNumber
       } else {
         if (!('date' in filters))
@@ -160,7 +155,7 @@ export abstract class TaskService {
       const range = taskDateRange(date, timeZone, weekly)
 
       const weekNumber = weekly && phase
-        ? getPhaseWeekNumber(range.startDate, phase.startDate, phase.endDate)
+        ? getPhaseWeekNumber(range.startDate, phase)
         : null
 
       if (weekly && (weekNumber === null || weekNumber !== requestedWeek))
@@ -248,8 +243,8 @@ export abstract class TaskService {
         weekNumber,
         phase: phase
           ? {
-              startDate: phase.startDate.toISOString().slice(0, 10),
-              endDate: phase.endDate.toISOString().slice(0, 10),
+              startDate: calendarDateKey(phase.startDate),
+              endDate: calendarDateKey(phase.endDate),
               weekCount: getPhaseWeekCount(phase.startDate, phase.endDate),
             }
           : null,

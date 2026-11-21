@@ -1,5 +1,7 @@
 import { Temporal } from '@js-temporal/polyfill'
 
+const calendarDayPattern = /^\d{4}-\d{2}-\d{2}$/
+
 const regionTimeZones: Record<string, string> = {
   CN: 'Asia/Shanghai', HK: 'Asia/Hong_Kong', MO: 'Asia/Macau', TW: 'Asia/Taipei',
   SG: 'Asia/Singapore', JP: 'Asia/Tokyo', KR: 'Asia/Seoul', IN: 'Asia/Kolkata',
@@ -26,11 +28,15 @@ export function inferTimeZone(locale: string) {
 }
 
 function zoned(value: Date | string | number, timeZone: string) {
-  return Temporal.Instant.from(new Date(value).toISOString()).toZonedDateTimeISO(timeZone)
+  return Temporal.Instant.fromEpochMilliseconds(new Date(value).getTime()).toZonedDateTimeISO(timeZone)
 }
 
 export function calendarDate(value: Date | string | number, timeZone: string) {
   return zoned(value, timeZone).toPlainDate().toString()
+}
+
+export function calendarDateKey(value: Date | string) {
+  return (value instanceof Date ? value.toISOString() : value).slice(0, 10)
 }
 
 export function clockParts(value: Date | string | number, timeZone: string) {
@@ -50,14 +56,39 @@ export function calendarWeekday(date: string) {
   return Temporal.PlainDate.from(date).dayOfWeek
 }
 
+function startOfWeek(day: Temporal.PlainDate) {
+  return day.subtract({ days: day.dayOfWeek - 1 })
+}
+
+export function weekStartDate(date: string) {
+  return startOfWeek(Temporal.PlainDate.from(date)).toString()
+}
+
+export function weekNumberFrom(date: string, startDate: string) {
+  return Math.floor((calendarDayNumber(date) - calendarDayNumber(startDate)) / 7) + 1
+}
+
+export function getPhaseWeekNumber(date: string, phase: { startDate: Date | string, endDate: Date | string }) {
+  const start = calendarDateKey(phase.startDate)
+  const end = calendarDateKey(phase.endDate)
+  return date < start || date > end ? null : weekNumberFrom(date, start)
+}
+
+export function getPhaseWeekCount(startDate: Date | string, endDate: Date | string) {
+  return weekNumberFrom(calendarDateKey(endDate), calendarDateKey(startDate))
+}
+
+function startOfLocalDay(day: Temporal.PlainDate, timeZone: string) {
+  const start = day.toZonedDateTime(timeZone)
+  if (!start.toPlainDate().equals(day))
+    throw new RangeError('该日期在所选时区不存在')
+  return start
+}
+
 export function parseZonedDateTime(value: string, timeZone: string, disambiguation: 'reject' | 'compatible' = 'reject') {
   let milliseconds: number
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const day = Temporal.PlainDate.from(value)
-    const start = day.toZonedDateTime(timeZone)
-    if (!start.toPlainDate().equals(day))
-      throw new RangeError('该日期在所选时区不存在')
-    milliseconds = start.epochMilliseconds
+  if (calendarDayPattern.test(value)) {
+    milliseconds = startOfLocalDay(Temporal.PlainDate.from(value), timeZone).epochMilliseconds
   } else if (/(?:z|[+-]\d{2}:?\d{2})$/i.test(value)) {
     milliseconds = Temporal.Instant.from(value).epochMilliseconds
   } else {
@@ -67,18 +98,23 @@ export function parseZonedDateTime(value: string, timeZone: string, disambiguati
 }
 
 export function taskDateRange(date: string, timeZone: string, weekly: boolean) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date))
+  if (!calendarDayPattern.test(date))
     throw new RangeError('日期必须为 YYYY-MM-DD')
   const day = Temporal.PlainDate.from(date)
-  const first = weekly ? day.subtract({ days: day.dayOfWeek - 1 }) : day
+  const first = weekly ? startOfWeek(day) : day
   const next = first.add({ days: weekly ? 7 : 1 })
-  const start = first.toZonedDateTime(timeZone)
-  if (!weekly && !start.toPlainDate().equals(first))
-    throw new RangeError('该日期在所选时区不存在')
+  const start = weekly ? first.toZonedDateTime(timeZone) : startOfLocalDay(first, timeZone)
   return {
     startDate: first.toString(),
     endDate: next.subtract({ days: 1 }).toString(),
     start: new Date(start.epochMilliseconds),
     end: new Date(next.toZonedDateTime(timeZone).epochMilliseconds)
   }
+}
+
+export function scheduleTimeRange(date: string, startTime: string, endTime: string, timeZone: string) {
+  const start = parseZonedDateTime(`${date}T${startTime}`, timeZone, 'compatible')
+  const endDay = endTime <= startTime ? addCalendarDays(date, 1) : date
+  const end = parseZonedDateTime(`${endDay}T${endTime}`, timeZone, 'compatible')
+  return calendarDate(start, timeZone) === date ? { start, end } : null
 }

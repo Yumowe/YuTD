@@ -6,6 +6,7 @@ import ScheduleTableGrid from './ScheduleTableGrid.vue'
 import { createScheduleData, ScheduleDataKey } from './scheduleData'
 import type { BackgroundSelection } from '~/components/image/BackgroundSelect.vue'
 import { useSchedulePaging } from '~/composables/useAnimations/useSchedulePaging'
+import { calendarDateKey, dateToMinutes, minutesToTime, weekNumberFrom } from '~/utils/date'
 
 const props = withDefaults(defineProps<{
   /** 当前阶段的课程及排课数据，未就绪时为 undefined。 */
@@ -44,8 +45,8 @@ const { now, timeZone } = useSystemTime()
 const { preferences } = useAppPeferences()
 const hourPixels = computed(() => preferences.value?.hourPixels ?? 72)
 const maxFocusScale = computed(() => props.focusEnabled ? (preferences.value?.maxFocusScale ?? 2) : 0)
-const phaseDay = computed(() => calendarDate(props.phase.startDate, 'UTC'))
-const phaseEnd = computed(() => calendarDate(props.phase.endDate, 'UTC'))
+const phaseDay = computed(() => calendarDateKey(props.phase.startDate))
+const phaseEnd = computed(() => calendarDateKey(props.phase.endDate))
 const today = computed(() => now.value ? calendarDate(now.value, timeZone.value) : null)
 const scheduleData = createScheduleData(
   events, tasks, timeZone, computed(() => props.phase.weekCount), phaseDay, hourPixels, maxFocusScale
@@ -100,15 +101,6 @@ const dateGroups = computed<Date[][]>(() => {
 const activeGrid = shallowRef<InstanceType<typeof ScheduleTableGrid> | null>(null)
 
 // 时间范围和左轴由外层统一绘制，聚焦时跟随当前表格页的纵向缩放。
-function dateToMinutes(date: Date) {
-  const { hour, minute } = clockParts(date, timeZone.value)
-  return hour * 60 + minute
-}
-
-function minutesToTime(minutes: number) {
-  return `${Math.floor(minutes / 60).toString().padStart(2, '0')}:${(minutes % 60).toString().padStart(2, '0')}`
-}
-
 const scheduleBounds = scheduleData.bounds
 
 const hourMarks = computed(() => Array.from(
@@ -214,7 +206,7 @@ const periodSettings = computed(() => JSON.stringify([
 function initialGroup(groups: Date[][]) {
   const day = today.value
   if (!day) return groupIndices.value[0] ?? 1
-  const week = Math.floor((calendarDayNumber(day) - calendarDayNumber(phaseDay.value)) / 7) + 1
+  const week = weekNumberFrom(day, phaseDay.value)
   const containing = props.mode !== 'custom' && groups[week]?.length
     ? week
     : groups.findIndex(dates => dates.some(date => calendarDate(date, timeZone.value) === day))
@@ -250,12 +242,12 @@ onActivated(() => {
 
 // 当前周与时间标记
 const weekLabel = computed(() => [...new Set((dateGroups.value[group.value] ?? []).map(date =>
-  Math.floor((calendarDayNumber(calendarDate(date, timeZone.value)) - calendarDayNumber(phaseDay.value)) / 7) + 1
+  weekNumberFrom(calendarDate(date, timeZone.value), phaseDay.value)
 ))].filter(week => week >= 1 && week <= props.phase.weekCount).join(' / ') || '—')
 
 const currentTimeY = computed(() => {
   if (!now.value || !(dateGroups.value[group.value] ?? []).some(date => calendarDate(date, timeZone.value) === today.value)) return null
-  const minutes = dateToMinutes(now.value) + clockParts(now.value, timeZone.value).second / 60
+  const minutes = dateToMinutes(now.value, timeZone.value)
   return minutes < scheduleBounds.value.start || minutes > scheduleBounds.value.end ? null : minutesToY(minutes)
 })
 

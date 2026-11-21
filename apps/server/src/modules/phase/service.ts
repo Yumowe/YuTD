@@ -1,7 +1,9 @@
 import { BadRequestException, ConflictException, NotFoundException } from 'elysia-http-exception'
 import { prisma } from '#backend/lib/prisma'
+import { calendarDateKey, calendarDayNumber, calendarWeekday, getPhaseWeekCount, getPhaseWeekNumber } from '#shared/time'
 
-const DAY_IN_MS = 24 * 60 * 60 * 1000
+// 保留本地 seed 脚本的导入入口。
+export { getPhaseWeekCount }
 
 function parseDate(value: string) {
   const date = new Date(`${value}T00:00:00.000Z`)
@@ -10,25 +12,17 @@ function parseDate(value: string) {
   return date
 }
 
-export function getPhaseWeekCount(startDate: Date, endDate: Date) {
-  return Math.floor((endDate.getTime() - startDate.getTime()) / DAY_IN_MS / 7) + 1
-}
-
-export function getPhaseWeekNumber(date: string, startDate: Date, endDate: Date) {
-  const selected = parseDate(date)
-  if (selected < startDate || selected > endDate) return null
-  return Math.floor((selected.getTime() - startDate.getTime()) / DAY_IN_MS / 7) + 1
-}
-
 function validateRange(startDate: Date, endDate: Date) {
-  if (startDate.getUTCDay() !== 1)
+  const start = calendarDateKey(startDate)
+  const end = calendarDateKey(endDate)
+  if (calendarWeekday(start) !== 1)
     throw new BadRequestException('阶段开始日期必须是周一')
-  if (endDate.getUTCDay() !== 0)
+  if (calendarWeekday(end) !== 7)
     throw new BadRequestException('阶段结束日期必须是周日')
   if (endDate < startDate)
     throw new BadRequestException('阶段结束日期不能早于开始日期')
 
-  const inclusiveDays = Math.floor((endDate.getTime() - startDate.getTime()) / DAY_IN_MS) + 1
+  const inclusiveDays = calendarDayNumber(end) - calendarDayNumber(start) + 1
   if (inclusiveDays % 7 !== 0)
     throw new BadRequestException('阶段必须包含完整的自然周')
 }
@@ -93,7 +87,7 @@ export abstract class PhaseService {
         await tx.week.updateMany({ where: { phaseId: id }, data: { weekNumber: null } })
         const weeks = await tx.week.findMany({ where: { phaseId: id }, select: { id: true, date: true } })
         for (const week of weeks) {
-          await tx.week.update({ where: { id: week.id }, data: { weekNumber: getPhaseWeekNumber(week.date, startDate, endDate) } })
+          await tx.week.update({ where: { id: week.id }, data: { weekNumber: getPhaseWeekNumber(week.date, updated) } })
         }
       }
       return updated

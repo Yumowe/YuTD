@@ -34,7 +34,7 @@ class YuTDPlugin : Plugin() {
         val result = JSObject()
         result.put("bridgeVersion", 1)
         result.put("features", JSArray(listOf("preferences", "styles", "dataVersion", "phases", "events", "schedules",
-            "tasks", "tips", "resources", "images", "config", "auth", "reminders", "reminderQueue")))
+            "tasks", "tips", "resources", "images", "config", "auth", "reminders", "reminderQueue", "reminderStatus")))
         call.resolve(result)
     }
 
@@ -77,6 +77,11 @@ class YuTDPlugin : Plugin() {
     fun syncReminders(call: PluginCall) = execute(call, database.preferences) {
         ReminderScheduler.replace(context, call.getArray("notifications")
             ?: throw LocalApiException("notifications 必须是数组"))
+    }
+
+    @PluginMethod
+    fun getReminderStatus(call: PluginCall) = execute(call, database.preferences) {
+        ReminderScheduler.status(context)
     }
 
     @PluginMethod

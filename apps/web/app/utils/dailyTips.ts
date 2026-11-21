@@ -1,4 +1,4 @@
-import { taskDateRange } from '#shared/time'
+import { calendarDateKey, taskDateRange, weekStartDate } from './date'
 
 type DateValue = Date | string | null
 interface TipTask {
@@ -25,16 +25,11 @@ interface Occurrence {
   endTime: Date | string
 }
 
-export function dailyTipDateKey(value: Date | string): string {
-  // Eden 会将纯日期解析成 UTC 零点的 Date；还原原始日期，不按用户时区偏移。
-  return value instanceof Date ? value.toISOString().slice(0, 10) : value
-}
-
 export function visibleDailyTips<T extends DailyTip>(tips: readonly T[], tasks: readonly TipTask[], occurrences: readonly Occurrence[], day: string, now: Date, timeZone: string, phaseId?: number) {
   const timestamp = now.getTime()
   const range = taskDateRange(day, timeZone, false)
-  const week = taskDateRange(day, timeZone, true).startDate
-  const matches = (value: { date: Date | string, phaseId: number | null }, date: string) => dailyTipDateKey(value.date) === date
+  const week = weekStartDate(day)
+  const matches = (value: { date: Date | string, phaseId: number | null }, date: string) => calendarDateKey(value.date) === date
     && (phaseId === undefined || value.phaseId === null || value.phaseId === phaseId)
   const rank = (value: { time: number | null, ongoing: boolean }) => value.time === null ? 3 : value.ongoing ? 0 : value.time >= timestamp ? 1 : 2
   const compare = (a: { time: number | null, ongoing: boolean }, b: { time: number | null, ongoing: boolean }) => rank(a) - rank(b)

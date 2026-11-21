@@ -3,7 +3,7 @@ import AppPopup from '../common/AppPopup.vue'
 import EventEdit, { type EditableEvent } from './EventEdit.vue'
 import TaskEditPopup from './TaskEditPopup.vue'
 import type { EditableTask } from './TaskEdit.vue'
-import { calendarDate, calendarDayNumber } from '~/utils/date'
+import { getPhaseWeekCount } from '~/utils/date'
 
 const props = defineProps<{
   /** 课程及排课数据。 */
@@ -45,8 +45,7 @@ const editorPhaseId = computed(() => event.value?.phaseId ?? props.phaseId ?? 0)
 const weekCount = computed(() => {
   const phase = event.value?.phase
   if (!phase) return props.weekCount ?? 0
-  return Math.floor((calendarDayNumber(calendarDate(phase.endDate, 'UTC'))
-    - calendarDayNumber(calendarDate(phase.startDate, 'UTC'))) / 7) + 1
+  return getPhaseWeekCount(phase.startDate, phase.endDate)
 })
 
 const editorRef = ref<InstanceType<typeof EventEdit> | null>(null)
@@ -154,6 +153,7 @@ function deleted(id: EditableEvent['id']) {
         mode="panel"
         :editing="true"
         :phase-id="taskEvent.phaseId"
+        :phase="taskEvent.phase ?? undefined"
         :event-id="taskEvent.id"
         @update:open="!$event && (taskEvent = null)"
         @saved="emit('task-saved', $event)"

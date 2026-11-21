@@ -2,7 +2,7 @@
 // 组件与依赖
 import ScheduleDayColumn from './ScheduleDayColumn.vue'
 import { useScheduleFocus } from '~/composables/useAnimations/useScheduleFocus'
-import { weekdays as weekdayLabels } from '~/utils/date'
+import { calendarDateKey, dateToMinutes, formatMonthDay, weekdays as weekdayLabels, weekNumberFrom } from '~/utils/date'
 import { createScheduleData, ScheduleDataKey } from './scheduleData'
 
 const EventEditPopup = defineAsyncComponent(() => import('~/components/edit/EventEditPopup.vue'))
@@ -37,39 +37,27 @@ const { now, timeZone } = useSystemTime()
 const { preferences } = useAppPeferences()
 
 const maxWeek = computed(() => props.phase.weekCount)
-const phaseDay = computed(() => calendarDate(props.phase.startDate, 'UTC'))
+const phaseDay = computed(() => calendarDateKey(props.phase.startDate))
 const hourPixels = computed(() => preferences.value?.hourPixels ?? 72)
 const maxFocusScale = computed(() => props.focusEnabled ? (preferences.value?.maxFocusScale ?? 2) : 0)
 const scheduleData = inject(ScheduleDataKey, null)
   ?? createScheduleData(events, tasks, timeZone, maxWeek, phaseDay, hourPixels, maxFocusScale)
 const { schedules, taskLines, bounds: scheduleBounds } = scheduleData
 
-function dateToMinutes(date: Date) {
-  const { hour, minute } = clockParts(date, timeZone.value)
-  return hour * 60 + minute
-}
-
-function dateToWeekday(date: Date) {
-  return calendarWeekday(calendarDate(date, timeZone.value))
-}
-
-function weekOf(date: string) {
-  return Math.floor((calendarDayNumber(date) - calendarDayNumber(phaseDay.value)) / 7) + 1
-}
-
 // 周期由外层统一管理，前后页只渲染表格，不再各自加载背景。
 const visibleColumns = computed<ScheduleColumn[]>(() => props.dates.map((value) => {
   const date = calendarDate(value, timeZone.value)
-  return { key: date, date, weekday: calendarWeekday(date), week: weekOf(date) }
+  return { key: date, date, weekday: calendarWeekday(date), week: weekNumberFrom(date, phaseDay.value) }
 }))
 // 当前日期与时间范围
 function getSchedulePosition(date: Date) {
-  const weekNumber = weekOf(calendarDate(date, timeZone.value))
+  const day = calendarDate(date, timeZone.value)
+  const weekNumber = weekNumberFrom(day, phaseDay.value)
 
   return {
     week: weekNumber,
-    weekday: dateToWeekday(date),
-    minutes: dateToMinutes(date) + clockParts(date, timeZone.value).second / 60,
+    weekday: calendarWeekday(day),
+    minutes: dateToMinutes(date, timeZone.value),
     inPhase: weekNumber >= 1 && weekNumber <= maxWeek.value
   }
 }
@@ -317,7 +305,7 @@ defineExpose({ resetFocus, createEvent, centerCurrentTime, activate, deactivate,
           <span class="schedule-header-prefix">周</span>{{ weekdayLabels[column.weekday - 1]?.slice(1) }}
         </span>
         <span class="schedule-header-date">
-          {{ column.date.slice(5).replace('-', '/') }}
+          {{ formatMonthDay(column.date) }}
         </span>
       </div>
     </div>

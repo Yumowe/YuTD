@@ -55,7 +55,7 @@ const actions = ref<InstanceType<typeof TaskActions> | null>(null)
 const completed = computed(() => isTaskClosed(currentTask.value))
 
 const completionTitle = computed(() => currentTask.value.completedAt
-  ? `${currentTask.value.status === 'CANCELLED' ? '放弃' : '完成'}时间：${calendarDate(currentTask.value.completedAt, timeZone.value)} ${Object.values(clockParts(currentTask.value.completedAt, timeZone.value)).map(part => String(part).padStart(2, '0')).join(':')}`
+  ? `${currentTask.value.status === 'CANCELLED' ? '放弃' : '完成'}时间：${formatLocalDateTime(currentTask.value.completedAt, timeZone.value).replace('T', ' ')}`
   : '')
 
 const timestamp = (value: Task['plannedDate']) => value ? new Date(value).getTime() : NaN
@@ -111,8 +111,7 @@ function dateLabel(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
 }
 
 function dateTitle(date: { kind: 'plan' | 'due', value: Task['plannedDate'] }) {
-  const parts = clockParts(date.value!, timeZone.value)
-  return `${dateLabel(date)}：${calendarDate(date.value!, timeZone.value)} ${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
+  return `${dateLabel(date)}：${formatLocalDateTime(date.value!, timeZone.value, 'minute').replace('T', ' ')}`
 }
 
 function isDisplayDay(date: { day: string }) {
