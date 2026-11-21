@@ -1,7 +1,7 @@
 import type { Prisma } from '#prisma/client'
 import { BadRequestException, NotFoundException } from 'elysia-http-exception'
 import { prisma } from '#backend/lib/prisma'
-import { getPhaseWeekCount } from '#backend/modules/phase/service'
+import { getPhaseWeekCount } from '#shared/time'
 import { validateTimeRange, validateWeeks } from '#backend/modules/eventSchedule/service'
 import type { EventModelType } from './model'
 

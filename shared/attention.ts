@@ -1,4 +1,4 @@
-import { calendarDate, taskDateRange } from './time.ts'
+import { calendarDate, taskDateRange, weekStartDate } from './time.ts'
 
 type DateValue = Date | string | null
 interface AttentionTask {
@@ -29,7 +29,7 @@ export const isTaskClosed = (task: Pick<AttentionTask, 'completed' | 'status'>) 
 export function dailyTipGroups<T extends AttentionTip>(tips: readonly T[], tasks: readonly AttentionTask[], occurrences: readonly TipOccurrence[], date: Date, timeZone: string, phaseId?: number) {
   const day = calendarDate(date, timeZone)
   const range = taskDateRange(day, timeZone, false)
-  const week = taskDateRange(day, timeZone, true).startDate
+  const week = weekStartDate(day)
   const matches = (value: { date: string, phaseId?: number | null }, selected: string) => value.date === selected
     && (phaseId === undefined || value.phaseId == null || value.phaseId === phaseId)
   const timestamp = date.getTime()

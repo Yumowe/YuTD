@@ -29,6 +29,7 @@ export default defineConfig({
               { text: '前端 · Vue / Nuxt', link: '/developer/web/frontend' },
               { text: 'API 请求、缓存与通知', link: '/developer/web/api' },
               { text: '页面与组件规范', link: '/developer/web/page-format' },
+              { text: '日期工具 · utils/date.ts', link: '/developer/utils/date' },
               { text: '后端 · Bun / Elysia', link: '/developer/web/backend' }
             ]
           },

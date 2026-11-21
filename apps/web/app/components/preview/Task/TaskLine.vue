@@ -34,22 +34,9 @@ const glassLayer = inject(GlassLayerKey, null)
 
 const { timeZone } = useSystemTime()
 
-function dateToTimeString(date: Date): string {
-  const parts = clockParts(date, timeZone.value)
-  const hours = String(parts.hour).padStart(2, '0')
-  const minutes = String(parts.minute).padStart(2, '0')
-
-  return `${hours}:${minutes}`
-}
-
 const timeText = computed(() => {
-  if (props.kind === 'plan' && props.plannedDate) {
-    return dateToTimeString(props.plannedDate)
-  } else if (props.kind === 'due' && props.dueDate) {
-    return dateToTimeString(props.dueDate)
-  } else {
-    return ''
-  }
+  const date = props.kind === 'plan' ? props.plannedDate : props.dueDate
+  return date ? formatClockTime(date, timeZone.value) : ''
 })
 
 const popoverId = useId()

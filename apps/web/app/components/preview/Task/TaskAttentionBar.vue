@@ -24,6 +24,8 @@ const props = withDefaults(defineProps<{
   refreshEvents: () => Promise<unknown>
   /** 所属阶段 ID。 */
   phaseId: ApiData<Api['api']['phase']['get']>[number]['id']
+  /** 阶段开始日期。 */
+  startDate: ApiData<Api['api']['phase']['get']>[number]['startDate']
   /** 时间轴的阶段结束日期。 */
   endDate: ApiData<Api['api']['phase']['get']>[number]['endDate']
   /** 时间轴方向，默认横向。 */
@@ -44,12 +46,11 @@ const currentTime = computed(() => now.value ?? new Date())
 
 const today = computed(() => calendarDate(currentTime.value, timeZone.value))
 
-const endDay = computed(() => props.endDate.toISOString().slice(0, 10))
+const endDay = computed(() => calendarDateKey(props.endDate))
 
 function timeHour(date: Date) {
   const day = calendarDayNumber(calendarDate(date, timeZone.value)) - calendarDayNumber(today.value)
-  const { hour, minute, second } = clockParts(date, timeZone.value)
-  return day * 24 + hour + minute / 60 + (second + date.getMilliseconds() / 1000) / 3600
+  return day * 24 + dateToMinutes(date, timeZone.value) / 60 + date.getMilliseconds() / 3600000
 }
 
 const currentHour = computed(() => timeHour(currentTime.value))
@@ -672,6 +673,7 @@ defineExpose({ hourPixels: hourScale, replayGrowth })
         :open="true"
         :task="selectedTask"
         :phase-id="phaseId"
+        :phase="{ startDate, endDate }"
         :date="today"
         :events="events"
         :events-pending="eventsPending"

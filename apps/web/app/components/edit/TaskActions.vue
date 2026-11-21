@@ -37,7 +37,7 @@ const canCancel = computed(() => props.extended && !completed.value)
 const count = computed(() => 1 + Number(canPostpone.value) + Number(canCancel.value))
 const completionLabel = computed(() => `${completed.value ? '恢复未完成' : '标记完成'}：${props.task.title}`)
 const completionTitle = computed(() => props.task.completedAt
-  ? `${completionLabel.value}\n${props.task.status === 'CANCELLED' ? '取消' : '完成'}时间：${calendarDate(props.task.completedAt, timeZone.value)} ${Object.values(clockParts(props.task.completedAt, timeZone.value)).map(part => String(part).padStart(2, '0')).join(':')}`
+  ? `${completionLabel.value}\n${props.task.status === 'CANCELLED' ? '取消' : '完成'}时间：${formatLocalDateTime(props.task.completedAt, timeZone.value).replace('T', ' ')}`
   : completionLabel.value)
 
 async function saveChange(id: number, change: TaskChange) {
@@ -69,17 +69,11 @@ function cancelTask() {
   void saveChange(props.task.id, { status: 'CANCELLED', isDone: false })
 }
 
-function localDateTime(date: Date) {
-  const parts = clockParts(date, timeZone.value)
-  const clock = [parts.hour, parts.minute, parts.second].map(part => String(part).padStart(2, '0')).join(':')
-  return `${calendarDate(date, timeZone.value)}T${clock}`
-}
-
 const deferOpen = ref(false)
 const deferDate = ref('')
 const deferError = ref('')
-const deferMinimum = computed(() => localDateTime(new Date((now.value?.getTime() ?? Date.now()) + 1000)))
-const deferMaximum = computed(() => props.task.dueDate ? localDateTime(new Date(timestamp(props.task.dueDate) - 1)) : undefined)
+const deferMinimum = computed(() => formatLocalDateTime((now.value?.getTime() ?? Date.now()) + 1000, timeZone.value))
+const deferMaximum = computed(() => props.task.dueDate ? formatLocalDateTime(timestamp(props.task.dueDate) - 1, timeZone.value) : undefined)
 
 function canDefer(date: Date) {
   return Number.isFinite(date.getTime()) && date.getTime() > (now.value?.getTime() ?? Date.now())
@@ -88,8 +82,8 @@ function canDefer(date: Date) {
 
 const deferPresets = computed(() => {
   const current = now.value ?? new Date()
-  const local = localDateTime(current)
-  const day = calendarDate(current, timeZone.value)
+  const local = formatLocalDateTime(current, timeZone.value)
+  const day = calendarDateKey(local)
   const nextDay = (days: number) => parseZonedDateTime(`${addCalendarDays(day, days)}${local.slice(10)}`, timeZone.value, 'compatible')
   const presets = [
     { label: '一小时后', date: new Date(current.getTime() + 3600000) },
@@ -106,7 +100,7 @@ function openDefer() {
   deferError.value = ''
   const first = deferPresets.value.find(preset => !preset.disabled)
   const due = timestamp(props.task.dueDate)
-  deferDate.value = first ? localDateTime(first.date) : Number.isFinite(due) ? localDateTime(new Date(due - 1)) : ''
+  deferDate.value = first ? formatLocalDateTime(first.date, timeZone.value) : Number.isFinite(due) ? formatLocalDateTime(due - 1, timeZone.value) : ''
   deferOpen.value = true
 }
 
@@ -208,7 +202,7 @@ defineExpose({ pending, count })
             class="button"
             type="button"
             :disabled="preset.disabled || unavailable"
-            @click="deferDate = localDateTime(preset.date); deferError = ''"
+            @click="deferDate = formatLocalDateTime(preset.date, timeZone); deferError = ''"
           >
             {{ preset.label }}
           </button>

@@ -37,11 +37,11 @@ watch([() => props.open, () => props.phase], ([open, phase]) => {
   if (!open) return
   deleteCandidate.value = false
   const day = calendarDate(now.value ?? new Date(), timeZone.value)
-  const monday = addCalendarDays(day, 1 - calendarWeekday(day))
+  const monday = weekStartDate(day)
   Object.assign(form, {
     name: phase?.name ?? '',
-    startDate: phase ? new Date(phase.startDate).toISOString().slice(0, 10) : monday,
-    endDate: phase ? new Date(phase.endDate).toISOString().slice(0, 10) : addCalendarDays(monday, 6)
+    startDate: phase ? calendarDateKey(phase.startDate) : monday,
+    endDate: phase ? calendarDateKey(phase.endDate) : addCalendarDays(monday, 6)
   })
   error.value = ''
 }, { immediate: true })

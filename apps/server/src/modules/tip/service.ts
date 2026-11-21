@@ -1,7 +1,7 @@
 import type { Prisma } from '#prisma/client'
 import { BadRequestException, NotFoundException } from 'elysia-http-exception'
 import { prisma } from '#backend/lib/prisma'
-import { addCalendarDays, calendarDate, calendarDayNumber, calendarWeekday, parseZonedDateTime, taskDateRange } from '#shared/time'
+import { calendarDateKey, calendarWeekday, getPhaseWeekNumber, scheduleTimeRange, taskDateRange, weekStartDate } from '#shared/time'
 import { PreferencesService } from '../preferences/service'
 import type { TipModelType } from './model'
 
@@ -9,7 +9,7 @@ function validateDate(value: string) {
   const date = new Date(`${value}T00:00:00.000Z`)
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)
     || Number.isNaN(date.getTime())
-    || date.toISOString().slice(0, 10) !== value)
+    || calendarDateKey(date) !== value)
     throw new BadRequestException('日期必须是有效的 YYYY-MM-DD')
   return value
 }
@@ -24,7 +24,7 @@ function toRelations(ids: number[] | undefined, replaceCollections: boolean) {
 function calendarRelations(values: string[] | undefined, ids: string[] | undefined, weekly: boolean, replace: boolean) {
   if (values === undefined && ids === undefined) return undefined
   const references = [...new Set(ids ?? [])].map(id => ({ id }))
-  const dates = [...new Set((values ?? []).map(validateDate).map(date => weekly ? taskDateRange(date, 'UTC', true).startDate : date))]
+  const dates = [...new Set((values ?? []).map(validateDate).map(date => weekly ? weekStartDate(date) : date))]
   return {
     ...(replace ? { set: references } : { connect: references }),
     connectOrCreate: dates.map(date => ({ where: { id: `all:${date}` }, create: { id: `all:${date}`, date } }))
@@ -115,16 +115,13 @@ export abstract class TipService {
 
     const occurrences: { eventId: number, scheduleId: number, phaseId: number, time: string, endTime: string }[] = []
     for (const schedule of schedules) {
-      const firstDay = schedule.event.phase.startDate.toISOString().slice(0, 10)
-      const week = Math.floor((calendarDayNumber(day) - calendarDayNumber(firstDay)) / 7) + 1
-      if (!Array.isArray(schedule.weeks) || !schedule.weeks.includes(week)) continue
-      const start = parseZonedDateTime(`${day}T${schedule.startTime}`, timeZone, 'compatible')
-      const endDay = schedule.endTime <= schedule.startTime ? addCalendarDays(day, 1) : day
-      const end = parseZonedDateTime(`${endDay}T${schedule.endTime}`, timeZone, 'compatible')
-      if (calendarDate(start, timeZone) !== day) continue
+      const week = getPhaseWeekNumber(day, schedule.event.phase)
+      if (week === null || !Array.isArray(schedule.weeks) || !schedule.weeks.includes(week)) continue
+      const interval = scheduleTimeRange(day, schedule.startTime, schedule.endTime, timeZone)
+      if (!interval) continue
       occurrences.push({
         eventId: schedule.eventId, scheduleId: schedule.id, phaseId: schedule.event.phaseId,
-        time: start.toISOString(), endTime: end.toISOString(),
+        time: interval.start.toISOString(), endTime: interval.end.toISOString(),
       })
     }
 
@@ -132,7 +129,7 @@ export abstract class TipService {
     const tips = await prisma.tip.findMany({
       where: { OR: [
         { dates: { some: { date: day, ...(filters.phase === undefined ? {} : { OR: [{ phaseId: null }, { phaseId: filters.phase }] }) } } },
-        { weeks: { some: { date: taskDateRange(day, timeZone, true).startDate, ...(filters.phase === undefined ? {} : { OR: [{ phaseId: null }, { phaseId: filters.phase }] }) } } },
+        { weeks: { some: { date: weekStartDate(day), ...(filters.phase === undefined ? {} : { OR: [{ phaseId: null }, { phaseId: filters.phase }] }) } } },
         { events: { some: { id: { in: [...eventIds] } } } },
         { tasks: { some: { id: { in: tasks.map(task => task.id) } } } },
       ] },
@@ -147,7 +144,7 @@ export abstract class TipService {
     if (filters.date)
       where.dates = { some: { date: validateDate(filters.date) } }
     if (filters.week)
-      where.weeks = { some: { date: taskDateRange(validateDate(filters.week), 'UTC', true).startDate } }
+      where.weeks = { some: { date: weekStartDate(validateDate(filters.week)) } }
     if (filters.eventId)
       where.events = { some: { id: filters.eventId } }
     if (filters.phaseId)

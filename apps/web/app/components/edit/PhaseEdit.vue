@@ -143,6 +143,7 @@ function phaseSaved(phase: ApiData<Api['api']['phase']['post']>) {
     :refresh-events="props.refreshEvents"
     :open="true"
     :phase-id="creationPhase.id"
+    :phase="creationPhase"
     :date="creationDate"
     :editing="true"
     @update:open="!$event && (creating = null)"

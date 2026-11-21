@@ -12,16 +12,23 @@ const props = withDefaults(defineProps<{
   count?: number
   /** 已选择的周数。 */
   modelValue?: number[]
-  /** 是否允许选择和拖动涂选。 */
+  /** 是否显示所有选项并允许选择。 */
   selectable?: boolean
+  /** 是否允许按住拖动涂选。 */
+  paintable?: boolean
+  /** 是否禁用交互，保留已显示选项。 */
+  disabled?: boolean
   /** 是否仅允许单选。 */
   exclusive?: boolean
+  /** 各选项的无障碍名称，按编号排列。 */
+  labels?: readonly string[]
   /** 选中项颜色。 */
   color?: string | null
 }>(), {
   count: 0,
   modelValue: () => [],
   selectable: false,
+  paintable: true,
   exclusive: false,
   color: null
 })
@@ -126,7 +133,7 @@ let painting: { pointerId: number, visited: Set<number>, selected: Set<number>, 
 
 let ignoreClick = false
 
-watch([() => props.selectable, () => props.count, () => props.exclusive], cancelPainting)
+watch([() => props.selectable, () => props.paintable, () => props.disabled, () => props.count, () => props.exclusive], cancelPainting)
 
 onBeforeUnmount(cancelPainting)
 
@@ -159,7 +166,7 @@ function paint(weeks: number[]) {
 }
 
 function startPainting(weeks: number[], event: PointerEvent) {
-  if (!props.selectable || !event.isPrimary || event.button !== 0 || painting) return
+  if (!props.selectable || !props.paintable || props.disabled || !event.isPrimary || event.button !== 0 || painting) return
   event.preventDefault()
   stopPainting()
   ignoreClick = true
@@ -205,7 +212,7 @@ function clickWeek(weeks: number[], event?: MouseEvent) {
 }
 
 function toggle(weeks: number[]) {
-  if (!props.selectable)
+  if (!props.selectable || props.disabled)
     return
 
   if (props.exclusive) {
@@ -231,7 +238,11 @@ function toggle(weeks: number[]) {
   <div
     ref="picker"
     class="week-picker"
-    :class="{ 'week-picker--selectable': selectable }"
+    :class="{
+      'week-picker--selectable': selectable,
+      'week-picker--paintable': selectable && paintable,
+      'week-picker--with-details': $slots.detail
+    }"
     :style="color ? { '--week-color': color } : undefined"
   >
     <button
@@ -243,17 +254,23 @@ function toggle(weeks: number[]) {
         'week-picker__item--selected': group.selected,
         'week-picker__item--merged': group.merged
       }"
-      :disabled="!selectable"
-      :title="groupTitle(group.weeks)"
+      :disabled="!selectable || disabled"
+      :title="labels?.[group.weeks[0]! - 1] ?? groupTitle(group.weeks)"
+      :aria-label="labels?.[group.weeks[0]! - 1]"
       :aria-pressed="selectable ? group.selected : undefined"
       :data-week="group.weeks[0]"
       @pointerdown="startPainting(group.weeks, $event)"
       @dragstart.prevent
       @click="clickWeek(group.weeks, $event)"
     >
-      <div class="week-number">
+      <span class="week-picker__ball">
         {{ group.label }}
-      </div>
+      </span>
+      <slot
+        v-if="group.weeks[0] !== undefined"
+        name="detail"
+        :week="group.weeks[0]"
+      />
     </button>
   </div>
 </template>
@@ -269,40 +286,59 @@ function toggle(weeks: number[]) {
   gap: calc(var(--week-ball-size) * 0.15);
 }
 
-.week-number {
-  z-index: 3;
+.week-picker__item {
+  display: grid;
+  justify-items: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--week-color);
+  font: inherit;
 }
 
-.week-picker__item {
+.week-picker__ball {
   display: grid;
   place-items: center;
   box-sizing: border-box;
   width: var(--week-ball-size);
   height: var(--week-ball-size);
-  padding: 0;
   border: 1px solid var(--week-color);
   border-radius: 999px;
-  background-color: transparent;
-  color: var(--week-color);
-  font: inherit;
   font-size: clamp(0.5rem, calc(var(--week-ball-size) * 0.45), 0.875rem);
   line-height: 1;
 }
 
-.week-picker__item--merged {
+.week-picker__item--merged .week-picker__ball {
   width: auto;
   min-width: var(--week-ball-size);
   padding: 0 0.4em;
 }
 
-.week-picker__item--selected {
+.week-picker__item--selected .week-picker__ball {
   background-color: var(--week-color);
   color: var(--background-secondary);
 }
 
-.week-picker--selectable .week-picker__item {
+.week-picker--with-details .week-picker__item {
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  min-height: 56px;
+  padding: 4px 0;
+}
+
+.week-picker--with-details .week-picker__ball {
+  width: min(100%, var(--week-ball-size));
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.week-picker--selectable .week-picker__item:not(:disabled) {
   cursor: pointer;
   user-select: none;
+}
+
+.week-picker--paintable .week-picker__item:not(:disabled) {
   touch-action: none;
 }
 

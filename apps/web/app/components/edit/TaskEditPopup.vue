@@ -18,6 +18,8 @@ const props = withDefaults(defineProps<{
   task?: EditableTask | null
   /** 所属阶段 ID。 */
   phaseId: number
+  /** 阶段日期范围，用于显示阶段内周次。 */
+  phase?: Pick<ApiData<Api['api']['phase']['get']>[number], 'startDate' | 'endDate'>
   /** 关联事件 ID。 */
   eventId?: number
   /** 新建任务默认使用的日期。 */
@@ -64,6 +66,8 @@ defineExpose({ saving: computed(() => Boolean(editorRef.value?.saving)) })
     :open="open"
     :mode="mode"
     class="task-popup"
+    :class="{ 'task-popup--editing': editing }"
+    :style="editing ? { paddingInline: 0 } : undefined"
     :title="editing ? task ? '编辑任务' : '新建任务' : '任务详情'"
     :dismissible="!editorRef?.saving"
     :close-on-outside="!editing"
@@ -93,6 +97,7 @@ defineExpose({ saving: computed(() => Boolean(editorRef.value?.saving)) })
       :refresh-events="props.refreshEvents"
       :task="task"
       :phase-id="phaseId"
+      :phase="phase"
       :event-id="eventId"
       :date="date"
       :allow-new="false"
@@ -118,7 +123,13 @@ defineExpose({ saving: computed(() => Boolean(editorRef.value?.saving)) })
 
 <style scoped>
 .task-popup { --popup-width: 640px; }
-.task-popup :deep(.edit-task) { padding: 0; border: 0; background: transparent; }
+.task-popup--editing { --task-editor-end-gap: 20px; }
+.task-popup--editing :deep(.app-popup__header) { padding-inline: var(--task-editor-end-gap); }
+.task-popup :deep(.edit-task) { padding-block: 0; padding-inline-end: var(--task-editor-end-gap); border: 0; background: transparent; }
 .task-popup :deep(.task-block) { border-radius: 12px; }
 .task-popup .task-popup__background { height: auto; overflow: clip; border-radius: 12px; }
+
+@media (width < 480px) {
+  .task-popup--editing { --task-editor-end-gap: 12px; }
+}
 </style>

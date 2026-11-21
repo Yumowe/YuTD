@@ -1,8 +1,11 @@
-import { calendarDayNumber, calendarWeekday } from '#shared/time'
+import { calendarDate, calendarDateKey, calendarWeekday, clockParts, getPhaseWeekNumber, taskDateRange } from '#shared/time'
 
-export { calendarWeekday, clockParts, addCalendarDays, calendarDayNumber, parseZonedDateTime, normalizeTimeZone, inferTimeZone } from '#shared/time'
+export {
+  addCalendarDays, calendarDate, calendarDateKey, calendarDayNumber, calendarWeekday, clockParts,
+  getPhaseWeekCount, inferTimeZone, normalizeTimeZone, parseZonedDateTime, scheduleTimeRange, taskDateRange,
+  weekNumberFrom, weekStartDate
+} from '#shared/time'
 
-type Phase = ApiData<Api['api']['phase']['get']>[number]
 export const weekdays = [
   '周一',
   '周二',
@@ -29,43 +32,37 @@ export function dateToWeekday(date: Date, timeZone = 'UTC') {
   return calendarWeekday(calendarDate(date, timeZone))
 }
 
-const calendarFormatters = new Map<string, Intl.DateTimeFormat>()
+export function dateToMinutes(date: Date | string | number, timeZone: string) {
+  const { hour, minute, second } = clockParts(date, timeZone)
+  return hour * 60 + minute + second / 60
+}
 
-export function calendarDate(date: Date, timeZone: string): string {
-  let formatter = calendarFormatters.get(timeZone)
-  if (!formatter) {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit'
-    })
-    calendarFormatters.set(timeZone, formatter)
-  }
-  const parts = formatter.formatToParts(date)
+export function formatClockTime(date: Date | string | number, timeZone: string) {
+  return minutesToTime(Math.floor(dateToMinutes(date, timeZone)))
+}
 
-  const get = (type: 'year' | 'month' | 'day') =>
-    parts.find(part => part.type === type)?.value ?? ''
+export function formatLocalDateTime(date: Date | string | number, timeZone: string, precision: 'minute' | 'second' = 'second') {
+  const { hour, minute, second } = clockParts(date, timeZone)
+  const time = minutesToTime(hour * 60 + minute)
+  const seconds = precision === 'second' ? `:${String(second).padStart(2, '0')}` : ''
+  return `${calendarDate(date, timeZone)}T${time}${seconds}`
+}
 
-  return `${get('year')}-${get('month')}-${get('day')}`
+export function formatMonthDay(date: Date | string) {
+  return calendarDateKey(date).slice(5).replace('-', '/')
+}
+
+export function endOfCalendarDay(date: string, timeZone: string) {
+  return new Date(taskDateRange(date, timeZone, false).end.getTime() - 1)
 }
 
 export function getWeekNumber(
-  date: Date | null | undefined,
-  phase: Phase | null | undefined,
+  date: Date | string | null | undefined,
+  phase: Parameters<typeof getPhaseWeekNumber>[1] | null | undefined,
   timeZone: string
 ): number | null {
   if (!date || !phase) return null
 
-  const currentDate = calendarDate(date, timeZone)
-  const startDate = phase.startDate.toISOString().slice(0, 10)
-  const endDate = phase.endDate.toISOString().slice(0, 10)
-
-  if (currentDate < startDate || currentDate > endDate)
-    return null
-
-  const days = calendarDayNumber(currentDate)
-    - calendarDayNumber(startDate)
-
-  return Math.floor(days / 7) + 1
+  const currentDate = typeof date === 'string' ? date : calendarDate(date, timeZone)
+  return getPhaseWeekNumber(currentDate, phase)
 }

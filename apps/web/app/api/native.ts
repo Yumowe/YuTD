@@ -31,18 +31,33 @@ export interface NativeCapabilities {
   features: string[]
 }
 
+export interface ReminderData {
+  preferences: LocalPreferences
+  phases: ApiData<Routes['phase']['get']>
+  events: ApiData<Routes['event']['get']>
+  tasks: ApiData<Routes['task']['get']>
+  tips: ApiData<Routes['tip']['get']>
+}
+
+interface ReminderEntry {
+  id: number
+  title: string
+  body: string
+  kind: string
+  at: number
+}
+
 export interface NativeBridge {
   getCapabilities(): Promise<NativeCapabilities>
   getPreferences(): Promise<LocalPreferences>
   openAutoStartSettings(): Promise<{ target: 'autostart' | 'application' }>
-  getReminderData(options: { authToken?: string | null }): Promise<{
-    preferences: LocalPreferences
-    phases: Result<Routes['phase']['get']>
-    events: Result<Routes['event']['get']>
-    tasks: Result<Routes['task']['get']>
-    tips: Result<Routes['tip']['get']>
-  }>
+  getReminderData(options: { authToken?: string | null }): Promise<Wire<ReminderData>>
   syncReminders(options: { authToken?: string | null, notifications: LocalNotificationSchema[] }): Promise<{ queued: number, scheduled: number }>
+  getReminderStatus(options: { authToken?: string | null }): Promise<{
+    pending: ReminderEntry[]
+    mounted: (ReminderEntry & { exact: boolean }) | null
+    sent: (ReminderEntry & { sentAt: number })[]
+  }>
   updatePreferences(options: { data: Partial<LocalPreferences>, replace?: boolean }): Promise<LocalPreferences>
   resetPreferences(): Promise<LocalPreferences>
   getDataVersion(): Promise<{ version: string }>

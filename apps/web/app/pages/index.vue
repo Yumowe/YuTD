@@ -179,6 +179,7 @@ onDeactivated(() => {
           :tasks="tasksClient.data ?? []"
           :events-pending="eventsClient.read.loading.value"
           :refresh-events="eventsClient.read"
+          :start-date="phase.startDate"
           :end-date="phase.endDate"
         />
       </PageCard>

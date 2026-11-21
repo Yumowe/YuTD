@@ -25,7 +25,9 @@ apps/web/
 └─ package.json           前端依赖和脚本
 ```
 
-`pages/` 中的 `index.vue`、`schedule.vue`、`edit.vue`、`resources.vue`、`setting.vue`、`login.vue` 分别承担首页、日程、编辑、资源、设置与登录功能。
+`pages/` 中的 `index.vue`、`schedule.vue`、`resources.vue`、`setting.vue`、`reminder.vue`、`login.vue` 分别承担首页、日程、资源、设置、提醒检查与登录功能。
+
+从「设置 → 提醒 → 提醒检查」进入 `/reminder`。网页使用课程、任务、阶段和关联提示的数据预览未来提醒，复用 Android 同一套计划生成规则。Android 应用在此查看设备的待发队列、已登记闹钟和发送历史。
 
 `components/` 主要按用途划分：`common/` 为通用界面，`preview/` 为日程、任务、提示等展示，`edit/` 为编辑表单，`image/` 为图片上传、裁剪和背景设置。
 
@@ -101,6 +103,8 @@ onMounted(() => {
 未接入业务的 IndexedDB 缓存工具已归档至 `app/deprecated/useIndexedDB/`，不再参与 composables 自动导入。目前 `useApi` 只使用内存缓存，没有前端持久缓存或远程同步。`useApiMode()` 中的 `local`、`remote`、`remote-local` 仍是预留模式，没有完整的模式切换实现。
 
 仓库根目录的 `shared/` 保存资源、图片、时间、任务关注范围等共享 TypeScript 定义与工具；页面相关工具留在 `app/utils/`。
+
+前端日期函数统一从 [`~/utils/date`](../utils/date) 使用。时区换算、自然周和排期时段的共享实现位于 `shared/time.ts`。
 
 ## 开发与构建
 
