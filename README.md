@@ -11,7 +11,7 @@
   <a href="https://yutd.yumolf.top"
   >在线演示</a>
   &nbsp;&nbsp;|&nbsp;&nbsp;
-  <a href="https://moyinglongfei.github.io/YuTD/"
+  <a href="https://yumowe.github.io/YuTD/"
   >文档</a>
 </p>
 
@@ -28,9 +28,9 @@
 
 ## TodoList
 
-- [ ] i18n
-- [ ] 桌面端
-- [ ] 安卓端
+- [   ] i18n
+- [   ] 桌面端
+- [√] 安卓端
 
 ## 部署方式
 
@@ -53,5 +53,10 @@ bun start
 ```bash
 bun run build:binary
 ```
+
+## 加入讨论
+
+[![QQ 群 680759367](https://img.shields.io/badge/QQ-680759367-0077C8?style=for-the-badge&logo=qq&logoColor=white)](https://qm.qq.com/q/NsnbGVydY6)
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/SApxqVtKrk)
 
 # Contributions are welcome
